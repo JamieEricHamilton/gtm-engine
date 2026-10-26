@@ -1,6 +1,6 @@
 # Results
 
-Generated 2026-10-26 13:46 UTC from `select public.intel_results();`
+Generated 2026-10-26 14:05 UTC from `select public.intel_results();`
 (definition in `supabase/migrations/0003_results.sql`). Aggregates only. Re-render with
 `python3 tools/render_results.py results/latest.json > RESULTS.md`; the weekly GitHub Action does the same.
 
@@ -9,8 +9,8 @@ Generated 2026-10-26 13:46 UTC from `select public.intel_results();`
 | Stage | Count | Rate |
 |---|---:|---:|
 | Accounts in the system | 3317 | book 3186, net-new from press 94, net-new from the register 37 |
-| Matched to the companies register | 2840 | 85.6% of all accounts |
-| Register match at confidence 0.85 or above | 2474 | 87.1% of matches |
+| Matched to the companies register | 2841 | 85.6% of all accounts |
+| Register match at confidence 0.85 or above | 2475 | 87.1% of matches |
 | Disqualified (dead on the register) | 202 | exact-name matches to dissolved or liquidated companies only |
 | Disqualified (over 500 staff) | 16 | |
 | Disqualified (never-buy industry) | 85 | editable table |
