@@ -1,0 +1,1 @@
+15 2 * * * root /opt/n8n/backup.sh >> /var/log/n8n-backup.log 2>&1

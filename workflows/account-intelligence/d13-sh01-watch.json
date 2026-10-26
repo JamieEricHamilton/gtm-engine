@@ -1,0 +1,257 @@
+{
+  "id": "WF_D13_SH01_WATCH",
+  "name": "AI D13 - SH01 watch",
+  "description": "Polls Companies House filing history (capital category) for every resolved, active book company every 3 days. An SH01 (share allotment) in the last 180 days becomes a funding signal before any press release.",
+  "nodes": [
+    {
+      "id": "b3d0b157-143e-4cc4-83b5-e690395c9af7",
+      "name": "Every 5 min",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.3,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 5
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "28ec0822-09ae-4bd9-9d7f-2992cc954a61",
+      "name": "Load companies to check (Supabase RPC)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        224,
+        96
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "https://YOUR_SUPABASE_PROJECT_REF.supabase.co/rest/v1/rpc/intel_accounts_for_filings",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "supabaseApi",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ p_limit: 100 }) }}",
+        "options": {
+          "timeout": 60000
+        }
+      },
+      "credentials": {
+        "supabaseApi": {
+          "id": "CRED_SUPABASE",
+          "name": "Supabase (service role)"
+        }
+      },
+      "executeOnce": true,
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000
+    },
+    {
+      "id": "fee66634-cf00-454f-9a90-50653675a26d",
+      "name": "Run now (manual)",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        192
+      ],
+      "parameters": {}
+    },
+    {
+      "id": "96f46975-62c1-465e-8da2-479a4a5bb89b",
+      "name": "Companies House filing history (capital)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        448,
+        96
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "=https://api.company-information.service.gov.uk/company/{{ $json.company_number }}/filing-history",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBasicAuth",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "category",
+              "value": "capital"
+            },
+            {
+              "name": "items_per_page",
+              "value": "10"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 20000,
+          "batching": {
+            "batch": {
+              "batchSize": 2,
+              "batchInterval": 1100
+            }
+          },
+          "response": {
+            "response": {
+              "responseFormat": "text",
+              "outputPropertyName": "body",
+              "neverError": true
+            }
+          }
+        }
+      },
+      "credentials": {
+        "httpBasicAuth": {
+          "id": "CRED_COMPANIES_HOUSE",
+          "name": "Companies House API (basic auth)"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "e6b0bf12-b343-41c6-8db4-d28c34f5aa8f",
+      "name": "Parse filings",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        672,
+        96
+      ],
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// One row per capital filing in the last 180 days. SH01 = statement of capital following an allotment of shares = new shares issued, usually a round.\nconst a = $('Load companies to check (Supabase RPC)').item.json;\nlet body = {}; try { body = JSON.parse(String($json.body || '{}')); } catch (e) { body = {}; }\nconst items = Array.isArray(body.items) ? body.items : [];\nconst cutoff = new Date(); cutoff.setDate(cutoff.getDate() - 180);\nconst rows = [];\nfor (const f of items) {\n  const d = f.date ? new Date(f.date) : null;\n  if (!d || d < cutoff) continue;\n  const cap = f.description_values && Array.isArray(f.description_values.capital) ? f.description_values.capital : null;\n  rows.push({ account_id: a.account_id, company_number: a.company_number, transaction_id: f.transaction_id, type: f.type || '', category: f.category || '', description: f.description || '', date: f.date || null, action_date: f.action_date || (f.description_values && f.description_values.date) || null, capital: cap, doc: (f.links && f.links.document_metadata) || null });\n}\nreturn { json: { account_id: a.account_id, name: a.name, rows } };"
+      }
+    },
+    {
+      "id": "f495422f-ac2e-45b4-8a0a-f0227f686976",
+      "name": "Gather rows",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        896,
+        96
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const all = [];\nfor (const i of $input.all()) for (const r of (i.json.rows || [])) all.push(r);\nreturn [{ json: { p_rows: all, companies: $input.all().length } }];"
+      }
+    },
+    {
+      "id": "d61279a9-ded7-4e56-9df4-1429c7fc8242",
+      "name": "Save filings (Supabase RPC)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        1120,
+        96
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "https://YOUR_SUPABASE_PROJECT_REF.supabase.co/rest/v1/rpc/intel_save_filings",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "supabaseApi",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ p_rows: $json.p_rows }) }}",
+        "options": {
+          "timeout": 120000
+        }
+      },
+      "credentials": {
+        "supabaseApi": {
+          "id": "CRED_SUPABASE",
+          "name": "Supabase (service role)"
+        }
+      },
+      "executeOnce": true
+    }
+  ],
+  "connections": {
+    "Every 5 min": {
+      "main": [
+        [
+          {
+            "node": "Load companies to check (Supabase RPC)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Load companies to check (Supabase RPC)": {
+      "main": [
+        [
+          {
+            "node": "Companies House filing history (capital)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Run now (manual)": {
+      "main": [
+        [
+          {
+            "node": "Load companies to check (Supabase RPC)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Companies House filing history (capital)": {
+      "main": [
+        [
+          {
+            "node": "Parse filings",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse filings": {
+      "main": [
+        [
+          {
+            "node": "Gather rows",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gather rows": {
+      "main": [
+        [
+          {
+            "node": "Save filings (Supabase RPC)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "nodeGroups": [],
+  "settings": {
+    "executionOrder": "v1",
+    "availableInMCP": true,
+    "errorWorkflow": "WF_ERROR_ALERT",
+    "timezone": "Europe/London",
+    "saveDataSuccessExecution": "none",
+    "executionTimeout": 280
+  },
+  "tags": []
+}

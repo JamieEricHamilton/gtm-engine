@@ -1,0 +1,19 @@
+{
+  email ops@example.com
+}
+
+n8n.example.com {
+  reverse_proxy n8n:5678
+  encode gzip
+}
+
+hooks.example.com {
+  # only webhook paths are exposed on the public hostname
+  @hooks path /webhook/* /webhook-test/* /webhook-waiting/* /form/* /form-test/* /form-waiting/* /mcp/* /rest/oauth2-credential/callback /healthz
+  handle @hooks {
+    reverse_proxy n8n:5678
+  }
+  handle {
+    respond "nothing here" 404
+  }
+}

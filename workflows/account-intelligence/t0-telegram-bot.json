@@ -1,0 +1,457 @@
+{
+  "id": "WF_T0_TELEGRAM_BOT",
+  "name": "AI T0 - Telegram bot",
+  "description": "Handles everything the New money bot receives: a button tap (Mine / Owned) records the answer, acknowledges inside Telegram and removes the buttons; a plain message links the chat.",
+  "nodes": [
+    {
+      "id": "d2c61168-89bc-486f-b021-281bbd90f463",
+      "name": "Bot updates",
+      "type": "n8n-nodes-base.telegramTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        96
+      ],
+      "parameters": {
+        "updates": [
+          "message",
+          "callback_query"
+        ],
+        "additionalFields": {}
+      },
+      "credentials": {
+        "telegramApi": {
+          "id": "CRED_TELEGRAM_ALERTS",
+          "name": "Telegram alerts bot"
+        }
+      },
+      "webhookId": "00000000-0000-4000-8000-000000000010"
+    },
+    {
+      "id": "75df98f0-e066-49f5-8344-26f7c8bbe03b",
+      "name": "If",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        224,
+        96
+      ],
+      "parameters": {
+        "conditions": {
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "cq1",
+              "leftValue": "={{ $json.callback_query }}",
+              "operator": {
+                "operation": "exists",
+                "singleValue": true,
+                "type": "object"
+              },
+              "rightValue": ""
+            }
+          ],
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 3
+          }
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      }
+    },
+    {
+      "id": "0a21a113-45d6-4419-abad-f4581b1c89bc",
+      "name": "Read the tap",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        448,
+        0
+      ],
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// callback_data is 'mine:<alert_id>' or 'owned:<alert_id>'\nconst cq = $json.callback_query || {};\nconst [answer, id] = String(cq.data || '').split(':');\nconst label = answer === 'mine' ? 'Mine' : 'Owned';\nconst outcome = answer === 'mine' ? \"Writing the call line now; on the SDR's sheet in a few minutes.\" : 'Suppressed. It will not come back.';\nreturn { json: { answer, alert_id: Number(id), query_id: cq.id, chat_id: cq.message.chat.id, message_id: cq.message.message_id, original: cq.message.text || '', label, outcome } };"
+      }
+    },
+    {
+      "id": "6d417269-8db4-4333-a817-1c0cdfb07510",
+      "name": "Record answer (Supabase RPC)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        672,
+        0
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "https://YOUR_SUPABASE_PROJECT_REF.supabase.co/rest/v1/rpc/intel_alert_answer_v2",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "supabaseApi",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ p_alert_id: $json.alert_id, p_answer: $json.answer }) }}",
+        "options": {
+          "timeout": 60000
+        }
+      },
+      "credentials": {
+        "supabaseApi": {
+          "id": "CRED_SUPABASE",
+          "name": "Supabase (service role)"
+        }
+      },
+      "onError": "stopWorkflow"
+    },
+    {
+      "id": "afa68097-e6fa-4144-a3f7-2e8f077a25f7",
+      "name": "Answer tap",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        896,
+        0
+      ],
+      "parameters": {
+        "resource": "callback",
+        "operation": "answerQuery",
+        "queryId": "={{ $('Read the tap').item.json.query_id }}",
+        "additionalFields": {
+          "text": "={{ $('Read the tap').item.json.label }}"
+        }
+      },
+      "credentials": {
+        "telegramApi": {
+          "id": "CRED_TELEGRAM_ALERTS",
+          "name": "Telegram alerts bot"
+        }
+      },
+      "onError": "continueRegularOutput",
+      "webhookId": "00000000-0000-4000-8000-000000000011"
+    },
+    {
+      "id": "d3b62fb4-1427-4040-803d-66e2485842b4",
+      "name": "Remove buttons",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        1120,
+        0
+      ],
+      "parameters": {
+        "resource": "message",
+        "operation": "editMessageText",
+        "messageType": "message",
+        "chatId": "={{ $('Read the tap').item.json.chat_id }}",
+        "messageId": "={{ $('Read the tap').item.json.message_id }}",
+        "text": "={{ $('Read the tap').item.json.original }}\n\n→ {{ $('Read the tap').item.json.label }}. {{ $('Read the tap').item.json.outcome }}",
+        "replyMarkup": "none",
+        "additionalFields": {}
+      },
+      "credentials": {
+        "telegramApi": {
+          "id": "CRED_TELEGRAM_ALERTS",
+          "name": "Telegram alerts bot"
+        }
+      },
+      "webhookId": "00000000-0000-4000-8000-000000000012"
+    },
+    {
+      "id": "f865f315-5834-4b51-988c-45fda559c9dd",
+      "name": "Remember chat id (Supabase RPC)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        448,
+        192
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "https://YOUR_SUPABASE_PROJECT_REF.supabase.co/rest/v1/rpc/intel_set_setting",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "supabaseApi",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ p_key: \"telegram_chat_id\", p_value: String($json.message.chat.id) }) }}",
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "credentials": {
+        "supabaseApi": {
+          "id": "CRED_SUPABASE",
+          "name": "Supabase (service role)"
+        }
+      }
+    },
+    {
+      "id": "af6a3606-d7f4-4f3d-811b-d48e3b1ec646",
+      "name": "Reply",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        672,
+        192
+      ],
+      "parameters": {
+        "resource": "message",
+        "operation": "sendMessage",
+        "chatId": "={{ $('Bot updates').item.json.message.chat.id }}",
+        "text": "Linked. This chat gets the new money alerts.",
+        "additionalFields": {
+          "appendAttribution": false
+        }
+      },
+      "credentials": {
+        "telegramApi": {
+          "id": "CRED_TELEGRAM_ALERTS",
+          "name": "Telegram alerts bot"
+        }
+      },
+      "webhookId": "00000000-0000-4000-8000-000000000013"
+    },
+    {
+      "id": "b1d379ee-34ea-4c1c-8290-ad6f1c47c10e",
+      "name": "Mine?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        1344,
+        0
+      ],
+      "parameters": {
+        "conditions": {
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "m1",
+              "leftValue": "={{ $('Read the tap').item.json.answer }}",
+              "operator": {
+                "operation": "equals",
+                "type": "string"
+              },
+              "rightValue": "mine"
+            }
+          ],
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          }
+        }
+      }
+    },
+    {
+      "id": "dffa54ed-6e3f-4208-9d52-4db52a5845dd",
+      "name": "Write why-now (D7)",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.4,
+      "position": [
+        1568,
+        -96
+      ],
+      "parameters": {
+        "options": {
+          "waitForSubWorkflow": true
+        },
+        "workflowId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "WF_D07_WHY_NOW"
+        },
+        "workflowInputs": {
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true,
+          "mappingMode": "defineBelow",
+          "matchingColumns": [],
+          "schema": [],
+          "value": {}
+        }
+      }
+    },
+    {
+      "id": "11957727-8bb1-4896-b772-91b809ea38b8",
+      "name": "Push to sheet (D8)",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.4,
+      "position": [
+        1792,
+        -96
+      ],
+      "parameters": {
+        "options": {
+          "waitForSubWorkflow": true
+        },
+        "workflowId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "WF_D08_PUSH_TO_SHEET"
+        },
+        "workflowInputs": {
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true,
+          "mappingMode": "defineBelow",
+          "matchingColumns": [],
+          "schema": [],
+          "value": {}
+        }
+      }
+    },
+    {
+      "id": "f3be7753-6168-4ecb-acce-779048f21ee1",
+      "name": "Confirm on sheet",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        2016,
+        -96
+      ],
+      "parameters": {
+        "additionalFields": {
+          "appendAttribution": false
+        },
+        "chatId": "={{ $('Read the tap').item.json.chat_id }}",
+        "operation": "sendMessage",
+        "resource": "message",
+        "text": "={{ $('Record answer (Supabase RPC)').item.json.name }} is on the SDR's sheet."
+      },
+      "credentials": {
+        "telegramApi": {
+          "id": "CRED_TELEGRAM_ALERTS",
+          "name": "Telegram alerts bot"
+        }
+      },
+      "webhookId": "00000000-0000-4000-8000-000000000014"
+    }
+  ],
+  "connections": {
+    "Bot updates": {
+      "main": [
+        [
+          {
+            "node": "If",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If": {
+      "main": [
+        [
+          {
+            "node": "Read the tap",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Remember chat id (Supabase RPC)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read the tap": {
+      "main": [
+        [
+          {
+            "node": "Record answer (Supabase RPC)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Record answer (Supabase RPC)": {
+      "main": [
+        [
+          {
+            "node": "Answer tap",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Answer tap": {
+      "main": [
+        [
+          {
+            "node": "Remove buttons",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Remember chat id (Supabase RPC)": {
+      "main": [
+        [
+          {
+            "node": "Reply",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Remove buttons": {
+      "main": [
+        [
+          {
+            "node": "Mine?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Mine?": {
+      "main": [
+        [
+          {
+            "node": "Write why-now (D7)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Write why-now (D7)": {
+      "main": [
+        [
+          {
+            "node": "Push to sheet (D8)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Push to sheet (D8)": {
+      "main": [
+        [
+          {
+            "node": "Confirm on sheet",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "nodeGroups": [],
+  "settings": {
+    "executionOrder": "v1",
+    "availableInMCP": true,
+    "errorWorkflow": "WF_ERROR_ALERT",
+    "timezone": "Europe/London"
+  },
+  "tags": []
+}

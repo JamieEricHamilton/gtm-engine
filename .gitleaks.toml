@@ -1,0 +1,10 @@
+# Default gitleaks rules plus nothing. Allowlist only the documented placeholders.
+title = "gtm-engine"
+[extend]
+useDefault = true
+[allowlist]
+regexes = [
+  '''SHEET_ID_[A-Z_]+''',
+  '''YOUR_SUPABASE_PROJECT_REF''',
+  '''00000000-0000-4000-8000-\d{12}''',
+]

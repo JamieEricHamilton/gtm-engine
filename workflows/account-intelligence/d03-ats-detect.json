@@ -1,0 +1,450 @@
+{
+  "id": "WF_D03_ATS_DETECT",
+  "name": "AI D3 - ATS detect",
+  "description": "Self-draining careers page scan: ATS provider and token, careers URL, competitor mentions, saved via intel_save_page_scan.",
+  "nodes": [
+    {
+      "id": "a5b8fc0e-8c32-4a50-8419-2556da85f458",
+      "name": "Sticky Note 7c555d9b",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        0,
+        360
+      ],
+      "parameters": {
+        "content": "## D3 - ATS detect and page signals\nSelf-draining: every 15 min it takes up to 250 unscanned accounts (intel_accounts_to_scan marks the attempt), fetches the homepage, finds the careers link, fetches that if no ATS was seen yet, and saves ats_provider / ats_token / careers_url / competitor mentions via intel_save_page_scan.\n\nWhen the load step returns nothing the run is a no-op. Unpublish once the whole book is scanned; re-run monthly.",
+        "color": 4,
+        "width": 560,
+        "height": 200
+      }
+    },
+    {
+      "id": "70e7af27-3645-4059-bad7-479835bb0f5f",
+      "name": "Every 5 min",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.4,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 5
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "b25ce118-1c9b-4afa-a5ed-c0a992836b5e",
+      "name": "Config",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.5,
+      "position": [
+        224,
+        96
+      ],
+      "parameters": {
+        "mode": "manual",
+        "assignments": {
+          "assignments": [
+            {
+              "id": "c1",
+              "name": "account_limit",
+              "type": "number",
+              "value": 20
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "ae7d0a66-902c-405b-b0f3-2831cf084ab0",
+      "name": "Run scan (manual)",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        192
+      ],
+      "parameters": {}
+    },
+    {
+      "id": "1937ab7e-018d-430f-bc2e-dfacc2c416b9",
+      "name": "Load accounts to scan",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        448,
+        96
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "https://YOUR_SUPABASE_PROJECT_REF.supabase.co/rest/v1/rpc/intel_accounts_to_scan",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "supabaseApi",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ p_limit: $json.account_limit }) }}",
+        "options": {}
+      },
+      "credentials": {
+        "supabaseApi": {
+          "id": "CRED_SUPABASE",
+          "name": "Supabase (service role)"
+        }
+      },
+      "executeOnce": true,
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000
+    },
+    {
+      "id": "abc9b09b-dccd-488f-9d46-8e12a7623602",
+      "name": "Fetch homepage",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        672,
+        96
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "=https://{{ $json.domain }}/",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "User-Agent",
+              "value": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0 Safari/537.36"
+            },
+            {
+              "name": "Accept",
+              "value": "text/html,application/xhtml+xml"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 15000,
+          "allowUnauthorizedCerts": true,
+          "redirect": {
+            "redirect": {
+              "followRedirects": true,
+              "maxRedirects": 8
+            }
+          },
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true,
+              "responseFormat": "text",
+              "outputPropertyName": "body"
+            }
+          },
+          "batching": {
+            "batch": {
+              "batchSize": 8,
+              "batchInterval": 1000
+            }
+          }
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "4b2ea465-2a09-4d53-af32-29b98c5b5d40",
+      "name": "Scan homepage",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        896,
+        96
+      ],
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// Detect ATS + competitor mentions in the homepage HTML, and find the careers link to fetch next.\n// HTML capped at 150KB: ATS embeds and nav links live near the top, and the task runner has a 30s budget per node.\n// Long unbroken alphanumeric runs (base64 data URIs, inline blobs) are blanked first and the subdomain patterns are\n// word-anchored and length-bounded: unbounded ([a-z0-9-]+) backtracked quadratically on those runs and aborted the runner.\nconst a = $('Load accounts to scan').item.json;\nconst r = $json || {};\nconst html = String(r.body || '').slice(0, 150000).replace(/[A-Za-z0-9+\\/=_-]{120,}/g, ' ');\nconst status = Number(r.statusCode) || null;\nconst title = (html.match(/<title[^>]*>([^<]{0,200})/i) || [,''])[1].trim();\nconst ATS = [\n  ['greenhouse', /(?:job-boards|boards)\\.greenhouse\\.io\\/([a-z0-9_-]+)/i], ['greenhouse', /grnh\\.se\\/([a-z0-9_-]+)/i],\n  ['lever', /jobs\\.lever\\.co\\/([a-z0-9_-]+)/i], ['ashby', /jobs\\.ashbyhq\\.com\\/([a-z0-9_-]+)/i],\n  ['workable', /apply\\.workable\\.com\\/([a-z0-9_-]+)/i], ['workable', /\\b([a-z0-9-]{1,63})\\.workable\\.com/i],\n  ['smartrecruiters', /(?:jobs|careers)\\.smartrecruiters\\.com\\/([a-z0-9_-]+)/i],\n  ['teamtailor', /\\b([a-z0-9-]{1,63})\\.teamtailor\\.com/i], ['recruitee', /\\b([a-z0-9-]{1,63})\\.recruitee\\.com/i],\n  ['personio', /\\b([a-z0-9-]{1,63})\\.jobs\\.personio\\.(?:de|com)/i], ['bamboohr', /\\b([a-z0-9-]{1,63})\\.bamboohr\\.com/i],\n  ['workday', /\\b([a-z0-9-]{1,63})\\.(?:wd\\d+\\.)?myworkdayjobs\\.com/i], ['pinpoint', /\\b([a-z0-9-]{1,63})\\.pinpointhq\\.com/i],\n  ['jazzhr', /\\b([a-z0-9-]{1,63})\\.applytojob\\.com/i], ['breezy', /\\b([a-z0-9-]{1,63})\\.breezy\\.hr/i],\n  ['bullhorn', /bullhornstaffing\\.com|bullhorn\\.com\\/careers|bhjobs/i], ['jobadder', /jobadder\\.com/i], ['vincere', /vincere\\.io/i],\n  ['hibob', /\\b([a-z0-9-]{1,63})\\.hibob\\.com/i], ['rippling', /ats\\.rippling\\.com\\/([a-z0-9_-]+)/i]\n];\nconst COMP = [['remote', /remote\\.com/i], ['oyster', /oysterhr\\.com/i], ['papaya', /papayaglobal\\.com/i], ['omnipresent', /omnipresent\\.com/i],\n  ['multiplier', /usemultiplier\\.com/i], ['gp', /globalization-partners\\.com|\\bg-p\\.com/i], ['velocity', /velocityglobal\\.com/i], ['own_brand', /own_brand\\.com/i], ['rippling', /rippling\\.com/i]];\nconst find = (list) => { const out = []; for (const [n, re] of list) { const m = html.match(re); if (m) out.push({ n, token: (m[1] || '').toLowerCase() || null, link: m[0] }); } return out; };\nconst ats = find(ATS); const comp = find(COMP).map(x => x.n);\n// careers links: only scan anchor tags, capped, so the regex work stays small\nconst links = new Set();\nconst re = /<a[^>]{0,300}href=[\"']([^\"'#]{1,300})[\"'][^>]{0,300}>([^<]{0,80})/gi; let m; let guard = 0;\nwhile ((m = re.exec(html)) && links.size < 8 && guard++ < 2000) {\n  const href = m[1], text = m[2];\n  if (/career|jobs?\\b|vacanc|join[- ]?us|work[- ]?(with|for)[- ]?us|we-?re-?hiring|opportunit/i.test(href + ' ' + text)) {\n    let u = href;\n    if (u.startsWith('//')) u = 'https:' + u; else if (u.startsWith('/')) u = 'https://' + a.domain + u; else if (!/^https?:/i.test(u)) u = 'https://' + a.domain + '/' + u;\n    if (!/mailto:|tel:|\\.(pdf|jpg|png)$/i.test(u)) links.add(u);\n  }\n}\nconst careers = [...links];\nconst careers_url = careers.find(u => ATS.some(([, r2]) => r2.test(u))) || careers[0] || null;\nreturn { json: { ...a, http_status: status, title, ats: ats[0] ? ats[0].n : null, ats_token: ats[0] ? ats[0].token : null,\n  ats_links: ats.map(x => x.link), competitor_mentions: comp, careers_links: careers, careers_url,\n  need_careers_fetch: !!(careers_url && !ats[0]) } };"
+      }
+    },
+    {
+      "id": "67e74068-069e-4361-86c3-9a5ef2cfe8ce",
+      "name": "Fetch careers page?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        1120,
+        96
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "f1",
+              "leftValue": "={{ $json.need_careers_fetch }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "75cc0598-ed91-434b-bbec-6934af103f82",
+      "name": "Fetch careers page",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        1344,
+        32
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $json.careers_url }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "User-Agent",
+              "value": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0 Safari/537.36"
+            },
+            {
+              "name": "Accept",
+              "value": "text/html,application/xhtml+xml"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 15000,
+          "allowUnauthorizedCerts": true,
+          "redirect": {
+            "redirect": {
+              "followRedirects": true,
+              "maxRedirects": 8
+            }
+          },
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true,
+              "responseFormat": "text",
+              "outputPropertyName": "body"
+            }
+          },
+          "batching": {
+            "batch": {
+              "batchSize": 8,
+              "batchInterval": 1000
+            }
+          }
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "af267f7c-f6d3-4d19-8ea7-349ccc91b8db",
+      "name": "Scan careers page",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1568,
+        32
+      ],
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// Second pass on the careers page: ATS embeds usually live here, not on the homepage. HTML capped at 150KB.\n// Long alphanumeric runs blanked and subdomain patterns word-anchored and bounded, same as Scan homepage, to stay inside the runner's 30s budget.\nconst s = $('Scan homepage').item.json;\nconst html = String(($json || {}).body || '').slice(0, 150000).replace(/[A-Za-z0-9+\\/=_-]{120,}/g, ' ');\nconst ATS = [\n  ['greenhouse', /(?:job-boards|boards)\\.greenhouse\\.io\\/([a-z0-9_-]+)/i], ['greenhouse', /grnh\\.se\\/([a-z0-9_-]+)/i], ['greenhouse', /boards-api\\.greenhouse\\.io\\/v1\\/boards\\/([a-z0-9_-]+)/i],\n  ['lever', /jobs\\.lever\\.co\\/([a-z0-9_-]+)/i], ['ashby', /jobs\\.ashbyhq\\.com\\/([a-z0-9_-]+)/i],\n  ['workable', /apply\\.workable\\.com\\/([a-z0-9_-]+)/i], ['workable', /\\b([a-z0-9-]{1,63})\\.workable\\.com/i],\n  ['smartrecruiters', /(?:jobs|careers)\\.smartrecruiters\\.com\\/([a-z0-9_-]+)/i],\n  ['teamtailor', /\\b([a-z0-9-]{1,63})\\.teamtailor\\.com/i], ['teamtailor', /teamtailor/i], ['recruitee', /\\b([a-z0-9-]{1,63})\\.recruitee\\.com/i],\n  ['personio', /\\b([a-z0-9-]{1,63})\\.jobs\\.personio\\.(?:de|com)/i], ['bamboohr', /\\b([a-z0-9-]{1,63})\\.bamboohr\\.com/i],\n  ['workday', /\\b([a-z0-9-]{1,63})\\.(?:wd\\d+\\.)?myworkdayjobs\\.com/i], ['pinpoint', /\\b([a-z0-9-]{1,63})\\.pinpointhq\\.com/i],\n  ['jazzhr', /\\b([a-z0-9-]{1,63})\\.applytojob\\.com/i], ['breezy', /\\b([a-z0-9-]{1,63})\\.breezy\\.hr/i],\n  ['bullhorn', /bullhornstaffing\\.com|bullhorn\\.com\\/careers|bhjobs/i], ['jobadder', /jobadder\\.com/i], ['vincere', /vincere\\.io/i],\n  ['hibob', /\\b([a-z0-9-]{1,63})\\.hibob\\.com/i], ['rippling', /ats\\.rippling\\.com\\/([a-z0-9_-]+)/i]\n];\nconst COMP = [['remote', /remote\\.com/i], ['oyster', /oysterhr\\.com/i], ['papaya', /papayaglobal\\.com/i], ['omnipresent', /omnipresent\\.com/i],\n  ['multiplier', /usemultiplier\\.com/i], ['gp', /globalization-partners\\.com|\\bg-p\\.com/i], ['velocity', /velocityglobal\\.com/i], ['own_brand', /own_brand\\.com/i], ['rippling', /rippling\\.com/i]];\nlet ats = null, token = null; const atsLinks = [...(s.ats_links || [])];\nfor (const [n, re] of ATS) { const m = html.match(re); if (m) { if (!ats) { ats = n; token = (m[1] || '').toLowerCase() || null; } atsLinks.push(m[0]); } }\nif (!ats) for (const [n, re] of ATS) { const m = String(s.careers_url || '').match(re); if (m) { ats = n; token = (m[1] || '').toLowerCase() || null; break; } }\nconst comp = new Set(s.competitor_mentions || []); for (const [n, re] of COMP) if (re.test(html)) comp.add(n);\nreturn { json: { ...s, ats: s.ats || ats, ats_token: s.ats_token || token, ats_links: [...new Set(atsLinks)], competitor_mentions: [...comp], pages_fetched: ['home', 'careers'] } };"
+      }
+    },
+    {
+      "id": "28d1fda7-70b5-4d2e-84a9-b03d64d62383",
+      "name": "Scan result",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1792,
+        96
+      ],
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// Fan-in: items arrive from Scan careers page (fetched) or straight from the IF (no careers fetch). One payload shape for the RPC.\nlet s = null; try { s = $('Scan careers page').item.json; } catch (e) {}\nif (!s || !s.account_id) s = $json;\nreturn { json: {\n  p_account_id: s.account_id, p_http_status: s.http_status || null, p_title: (s.title || '').slice(0, 200) || null,\n  p_ats_provider: s.ats || null, p_ats_token: s.ats_token || null, p_careers_url: s.careers_url || null,\n  p_ats_links: s.ats_links || [], p_careers_links: s.careers_links || [], p_competitor_mentions: s.competitor_mentions || [],\n  p_pages_fetched: s.pages_fetched || ['home']\n} };"
+      }
+    },
+    {
+      "id": "24484a2b-c051-47ac-9b25-36b44400e899",
+      "name": "Save page scan (Supabase RPC)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        2016,
+        96
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "https://YOUR_SUPABASE_PROJECT_REF.supabase.co/rest/v1/rpc/intel_save_page_scan",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "supabaseApi",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json) }}",
+        "options": {
+          "batching": {
+            "batch": {
+              "batchSize": 10,
+              "batchInterval": 250
+            }
+          }
+        }
+      },
+      "credentials": {
+        "supabaseApi": {
+          "id": "CRED_SUPABASE",
+          "name": "Supabase (service role)"
+        }
+      },
+      "onError": "continueRegularOutput"
+    }
+  ],
+  "connections": {
+    "Config": {
+      "main": [
+        [
+          {
+            "node": "Load accounts to scan",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Run scan (manual)": {
+      "main": [
+        [
+          {
+            "node": "Config",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Load accounts to scan": {
+      "main": [
+        [
+          {
+            "node": "Fetch homepage",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch homepage": {
+      "main": [
+        [
+          {
+            "node": "Scan homepage",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Scan homepage": {
+      "main": [
+        [
+          {
+            "node": "Fetch careers page?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch careers page?": {
+      "main": [
+        [
+          {
+            "node": "Fetch careers page",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Scan result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch careers page": {
+      "main": [
+        [
+          {
+            "node": "Scan careers page",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Scan careers page": {
+      "main": [
+        [
+          {
+            "node": "Scan result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Scan result": {
+      "main": [
+        [
+          {
+            "node": "Save page scan (Supabase RPC)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Every 5 min": {
+      "main": [
+        [
+          {
+            "node": "Config",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "nodeGroups": [],
+  "settings": {
+    "executionOrder": "v1",
+    "availableInMCP": true,
+    "errorWorkflow": "WF_ERROR_ALERT",
+    "timezone": "Europe/London",
+    "saveDataSuccessExecution": "none"
+  },
+  "tags": []
+}

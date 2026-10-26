@@ -1,0 +1,304 @@
+<title>OpsAutomated</title>
+<meta name="description" content="AI agents that do the admin inside your recruitment agency. Your consultants talk to candidates and clients. Everything else ticks over like clockwork.">
+<style>
+@font-face{font-family:'Archivo';font-style:normal;font-weight:500 900;font-stretch:100% 125%;font-display:swap;src:url(/fonts/archivo-var.woff2) format('woff2')}
+@font-face{font-family:'IBM Plex Sans';font-style:normal;font-weight:400 600;font-display:swap;src:url(/fonts/plexsans-var.woff2) format('woff2')}
+@font-face{font-family:'IBM Plex Mono';font-style:normal;font-weight:400;font-display:swap;src:url(/fonts/plexmono-400.woff2) format('woff2')}
+@font-face{font-family:'IBM Plex Mono';font-style:normal;font-weight:500;font-display:swap;src:url(/fonts/plexmono-500.woff2) format('woff2')}
+/* ============================================================
+   OpsAutomated site design system (10 Oct 2026)
+   Layout: one 1040px column, 16-40px gutter. Everything below derives from these tokens.
+   Type scale (desktop): 13 / 15 / 17 / 20 / 24 / 32 / 52 / 64, wordmark fits the column.
+   Spacing scale: 8 / 16 / 24 / 32 / 48 / 64 / 96 / 128.
+   Faces: Archivo (display, wdth 108-112, 800) / IBM Plex Sans (body) / IBM Plex Mono (labels, data).
+   Colour: dark only. bg #0b0f14, text #f4f6f8, muted #aab4bf, faint #6c7884, line #1f2933, accent #2ee6a6.
+   ============================================================ */
+:root{
+  --bg:#0b0f14; --bg-2:#10161d; --line:#1f2933; --fg:#f4f6f8; --fg-2:#aab4bf; --fg-3:#8a95a1;
+  --accent:#2ee6a6; --accent-ink:#06261b; --accent-dim:rgba(46,230,166,.10); --accent-line:rgba(46,230,166,.35);
+  --display:"Archivo",system-ui,sans-serif;
+  --body:"IBM Plex Sans",system-ui,-apple-system,"Segoe UI",sans-serif;
+  --mono:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,monospace;
+
+  --t-xs:13px;  --t-sm:15px;  --t-base:17px; --t-md:20px;
+  --t-h4:24px;  --t-h3:32px;  --t-h2:clamp(32px,4.2vw,52px); --t-h1:clamp(36px,5.2vw,64px);
+  --t-label:14px; --label-track:.12em;
+  --lh-tight:1.04; --lh-head:1.1; --lh-body:1.55;
+
+  --s-1:8px; --s-2:16px; --s-3:24px; --s-4:32px; --s-6:48px; --s-8:64px; --s-12:96px; --s-16:128px;
+  --sec:var(--s-12);
+  --radius:10px; --radius-lg:14px; --pill:999px;
+  --col:1040px; --gutter:clamp(16px,4vw,40px);
+  --btn-h:48px;
+  color-scheme:dark;
+}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{margin:0;background:var(--bg);color:var(--fg);font:400 var(--t-base)/var(--lh-body) var(--body);-webkit-font-smoothing:antialiased;padding-inline:var(--gutter)}
+a{color:var(--accent);text-decoration:none}
+a:hover{text-decoration:underline}
+:focus-visible{outline:2px solid var(--accent);outline-offset:3px;border-radius:4px}
+.wrap{max-width:var(--col);margin-inline:auto}
+h1,h2,h3{font-family:var(--display);font-variation-settings:"wdth" 108;font-weight:800;letter-spacing:-.025em;line-height:var(--lh-tight);text-wrap:balance;margin:0}
+p{margin:0}
+.label{font:500 var(--t-label)/1.4 var(--mono);letter-spacing:var(--label-track);text-transform:uppercase}
+.eyebrow{font:500 var(--t-label)/1.4 var(--mono);letter-spacing:var(--label-track);text-transform:uppercase;color:var(--accent)}
+.lead{color:var(--fg-2);font-size:var(--t-md);line-height:var(--lh-body);max-width:52ch}
+.btn{display:inline-flex;align-items:center;height:var(--btn-h);padding:0 var(--s-3);background:var(--accent);color:var(--accent-ink);font:600 16px/1 var(--body);border-radius:var(--radius)}
+.btn:hover{text-decoration:none;filter:brightness(1.07)}
+.btn.ghost{background:transparent;color:var(--fg);border:1px solid var(--line)}
+.btn.ghost:hover{border-color:var(--fg-3)}
+.chip{display:inline-flex;align-items:center;height:36px;padding:0 var(--s-2);font:500 var(--t-label)/1 var(--mono);letter-spacing:0;text-transform:none;color:var(--fg-2);border:1px solid var(--line);border-radius:var(--pill)}
+
+/* nav */
+.nav{display:flex;justify-content:space-between;align-items:center;height:80px;gap:var(--s-2)}
+.mark{font-family:var(--display);font-variation-settings:"wdth" 112;font-weight:800;font-size:20px;line-height:1;letter-spacing:-.035em;display:inline-flex;align-items:center;color:var(--fg)}
+.mark .o{color:var(--accent)}
+.mark .bar{display:inline-block;width:3px;height:.82em;background:var(--accent);margin-left:3px}
+.mark:hover{text-decoration:none}
+.nav a.cta{display:inline-flex;align-items:center;height:36px;padding:0 var(--s-2);font:500 var(--t-label)/1 var(--body);color:var(--fg);border:1px solid var(--line);border-radius:var(--pill)}
+.nav a.cta:hover{border-color:var(--accent);text-decoration:none}
+
+/* hero */
+.hero{padding-block:var(--s-12) var(--s-8)}
+.type{font-family:var(--display);font-variation-settings:"wdth" 112;font-weight:800;font-size:clamp(40px,8.4vw,116px);line-height:1;letter-spacing:-.04em;white-space:nowrap;display:flex;align-items:center;min-height:1em}
+.type .o{color:var(--accent)}
+.type .a{color:var(--fg)}
+.type .cursor{flex:0 0 auto;display:inline-block;width:.14em;height:.8em;background:var(--accent);margin-left:.07em;animation:blink .9s steps(1) infinite}
+.type .cursor.solid{animation:none;opacity:1}
+.type .measure{position:absolute;visibility:hidden;white-space:nowrap;pointer-events:none}
+@keyframes blink{50%{opacity:0}}
+.hero .eyebrow{margin-top:var(--s-6)}
+.hero h2{margin-top:var(--s-2);font-size:var(--t-h1);max-width:22ch}
+.hero .lead{margin-top:var(--s-3);max-width:46ch}
+.hero .actions{margin-top:var(--s-4);display:flex;flex-wrap:wrap;gap:var(--s-2);align-items:center}
+
+/* proof strip */
+.proof{display:grid;grid-template-columns:repeat(3,1fr);border-top:1px solid var(--line);border-bottom:1px solid var(--line)}
+.proof > div{padding:var(--s-4) var(--s-3) var(--s-4) 0;border-right:1px solid var(--line);min-width:0}
+.proof > div:not(:first-child){padding-left:var(--s-3)}
+.proof > div:last-child{border-right:0}
+.proof .n{font-family:var(--display);font-variation-settings:"wdth" 108;font-weight:800;font-size:clamp(36px,4vw,48px);letter-spacing:-.03em;line-height:1;font-variant-numeric:tabular-nums}
+.proof .n small{font-size:.5em;letter-spacing:0;color:var(--fg-2);font-weight:600;margin-left:var(--s-1)}
+.proof p{margin-top:var(--s-2);color:var(--fg-2);font-size:var(--t-sm);line-height:var(--lh-body);max-width:28ch}
+@media (max-width:700px){.proof{grid-template-columns:1fr}.proof > div{border-right:0;border-bottom:1px solid var(--line);padding-left:0!important}.proof > div:last-child{border-bottom:0}}
+
+/* sections */
+.sec{padding-block:var(--sec);border-bottom:1px solid var(--line)}
+.sec h2{font-size:var(--t-h2);max-width:20ch}
+.sec .lead{margin-top:var(--s-3)}
+
+/* what is an agent */
+.steps{margin-top:var(--s-6);display:grid;grid-template-columns:repeat(5,1fr);gap:var(--s-3)}
+.steps > div{min-width:0}
+.steps .k{font:500 var(--t-label)/1.4 var(--mono);letter-spacing:var(--label-track);text-transform:uppercase;color:var(--accent)}
+.steps p{margin-top:var(--s-1);color:var(--fg-2);font-size:var(--t-sm);line-height:var(--lh-body)}
+.lead.after{margin-top:var(--s-6);max-width:56ch}
+.fine{margin-top:var(--s-3);color:var(--fg-3);font-size:var(--t-sm);line-height:var(--lh-body)}
+@media (max-width:1000px){.steps{grid-template-columns:repeat(2,1fr);gap:var(--s-4) var(--s-3)}}
+@media (max-width:700px){.steps{grid-template-columns:1fr;gap:var(--s-3)}}
+
+/* what gets automated */
+.work{margin-top:var(--s-6);display:flex;flex-wrap:wrap;gap:var(--s-1) 10px}
+.work span{font-family:var(--display);font-variation-settings:"wdth" 104;font-weight:700;font-size:var(--t-md);letter-spacing:-.01em;line-height:1.2;padding:14px var(--s-2);border:1px solid var(--line);border-radius:var(--radius);color:var(--fg)}
+.work .note{flex-basis:100%;margin-top:var(--s-3);color:var(--fg-2);font-size:var(--t-sm);line-height:var(--lh-body);max-width:72ch}
+
+/* agents */
+.roster{margin-top:var(--s-6);display:grid;border-top:1px solid var(--line)}
+.agent{display:grid;grid-template-columns:200px 1fr;gap:var(--s-3);align-items:baseline;padding-block:var(--s-3);border-bottom:1px solid var(--line);min-width:0}
+.agent .role{font-family:var(--display);font-variation-settings:"wdth" 108;font-weight:800;font-size:var(--t-h3);letter-spacing:-.03em;line-height:1}
+.agent p{color:var(--fg-2);font-size:var(--t-base);line-height:var(--lh-body);max-width:56ch}
+@media (max-width:700px){.agent{grid-template-columns:1fr;gap:var(--s-1)}}
+.tiers{margin-top:var(--s-4);display:grid;grid-template-columns:1fr 1fr 1.4fr;gap:var(--s-2)}
+.tiers > div{border:1px solid var(--line);border-radius:var(--radius-lg);padding:var(--s-3);min-width:0}
+.tiers .k{font:500 var(--t-label)/1.4 var(--mono);letter-spacing:var(--label-track);text-transform:uppercase;color:var(--fg-3)}
+.tiers h3{font-size:var(--t-h4);margin-top:var(--s-1)}
+.tiers p{margin-top:var(--s-1);color:var(--fg-2);font-size:var(--t-sm);line-height:var(--lh-body)}
+.tiers .pick{border-color:var(--accent-line);background:linear-gradient(180deg,var(--accent-dim),transparent)}
+.tiers .pick .k{color:var(--accent)}
+.tiers .pick h3{font-size:var(--t-h3)}
+@media (max-width:700px){.tiers{grid-template-columns:1fr}}
+
+/* how we work */
+.flow{margin-top:var(--s-6);display:grid;grid-template-columns:repeat(4,1fr);gap:var(--s-3)}
+.flow > div{min-width:0}
+.flow .k{font:500 var(--t-label)/1.4 var(--mono);letter-spacing:var(--label-track);text-transform:uppercase;color:var(--accent)}
+.flow h3{font-size:var(--t-h4);margin-top:var(--s-1)}
+.flow p{margin-top:var(--s-1);color:var(--fg-2);font-size:var(--t-sm);line-height:var(--lh-body);max-width:30ch}
+@media (max-width:900px){.flow{grid-template-columns:1fr 1fr;gap:var(--s-4) var(--s-3)}}
+@media (max-width:700px){.flow{grid-template-columns:1fr}}
+.ats{margin-top:var(--s-6);display:flex;flex-wrap:wrap;gap:10px}
+.ats span.on{color:var(--accent);border-color:var(--accent)}
+.ats span.more{color:var(--fg-3);border-style:dashed}
+
+/* book */
+.book{padding-block:var(--sec)}
+.book h2{font-size:var(--t-h1);max-width:16ch}
+.book .lead{margin-top:var(--s-3);max-width:46ch}
+.book .actions{margin-top:var(--s-4);display:flex;flex-wrap:wrap;gap:var(--s-2);align-items:center}
+.book .mail{font:400 var(--t-sm)/1.5 var(--mono);color:var(--fg-2);display:inline-flex;gap:10px;align-items:center;flex-wrap:wrap}
+.book .mail button{font:500 12px/1 var(--mono);color:var(--fg);background:transparent;border:1px solid var(--line);border-radius:var(--pill);padding:7px 10px;cursor:pointer}
+.book .mail button:hover{border-color:var(--accent)}
+
+/* footer */
+.foot{padding-block:var(--s-4) var(--s-8);border-top:1px solid var(--line);display:grid;gap:var(--s-1);font:400 var(--t-xs)/1.6 var(--mono);color:var(--fg-3)}
+.foot a{color:var(--fg-3)}
+
+@media (max-width:1000px){:root{--sec:var(--s-8)}}
+@media (max-width:700px){
+  :root{--t-md:18px;--t-h3:28px;--t-h4:22px;--t-h1:30px;--sec:56px}
+  .work{flex-direction:column;align-items:flex-start}
+  .hero h2{text-wrap:pretty}
+  .hero{padding-block:var(--s-6) var(--s-6)}
+  .hero .eyebrow{margin-top:var(--s-4)}
+}
+@media (max-width:375px){:root{--t-h1:28px}}
+@media (prefers-reduced-motion:reduce){.type .cursor{animation:none}}
+</style>
+
+<div class="wrap">
+  <header class="nav">
+    <a href="#top" class="mark" aria-label="OpsAutomated"><span class="o">Ops</span><span>Automated</span><span class="bar"></span></a>
+    <a class="cta" href="#book">Book a call</a>
+  </header>
+
+  <section class="hero" id="top">
+    <h1 class="type" aria-label="OpsAutomated"><span id="typed"><span class="o">Ops</span><span class="a">Automated</span></span><span class="cursor solid" id="cursor"></span><span class="measure" id="measure" aria-hidden="true">OpsAutomated</span></h1>
+    <div class="eyebrow">AI agents for recruitment agencies</div>
+    <h2>More placements without adding payroll.</h2>
+    <p class="lead">AI agents built on top of your existing tech stack. Run and maintained by us.</p>
+    <div class="actions">
+      <a class="btn" href="#book">Book a 30-minute call</a>
+      <a class="btn ghost" href="#work">What gets automated</a>
+    </div>
+  </section>
+
+  <section class="proof" aria-label="Proof">
+    <div><div class="n">&lt;60<small>sec</small></div><p>from application received to scored in your ATS and response sent to the candidate</p></div>
+    <div><div class="n">24/7</div><p>the agent works weekends, and doesn't take holiday</p></div>
+    <div><div class="n">£36k</div><p>the loaded cost of a resourcer. An agent can do that job for a fraction</p></div>
+  </section>
+
+  <section class="sec" id="what">
+    <h2>What is an AI agent?</h2>
+    <p class="lead">Intelligence sitting on top of your data, wired into the tools you already use.</p>
+    <div class="steps">
+      <div><div class="k">1 → Trigger</div><p>An application lands. A role goes live. A client goes quiet.</p></div>
+      <div><div class="k">2 → Read</div><p>It reads what came in.</p></div>
+      <div><div class="k">3 → Decide</div><p>Against your rules, with your data.</p></div>
+      <div><div class="k">4 → Act</div><p>Writes the result into your ATS. Sends what needs sending.</p></div>
+      <div><div class="k">5 → Hand off</div><p>Stops for a human decision at the points you set. Nowhere else.</p></div>
+    </div>
+    <p class="lead after">Not a chat window. Nobody types into it. It runs because something happened, and the result is in the record before anyone has looked.</p>
+    <p class="fine">Nothing new to learn. Nothing to prompt. Every decision visible and reversible.</p>
+  </section>
+
+  <section class="sec" id="work">
+    <h2>Time kills deals.</h2>
+    <p class="lead">With agents on your desk you are never last to the shortlist again. Right now this is an advantage. It won't be for long.</p>
+    <div class="work">
+      <span>First to shortlist</span>
+      <span>Maximise your database</span>
+      <span>BD all day, every day</span>
+      <span>Client feedback chased</span>
+      <span>Every candidate answered</span>
+      <span>ATS always up to date</span>
+      <span>Every CV in your format</span>
+      <span>Interviews booked</span>
+      <span>Adverts written</span>
+      <span>References chased</span>
+      <p class="note">The agents run so your consultants can spend their time on what matters: speaking to candidates and looking after clients. Every score is visible and can be overridden. Nothing reaches a candidate or a client without a consultant's say-so.</p>
+    </div>
+  </section>
+
+  <section class="sec" id="agents">
+    <h2>One system. Four modules.</h2>
+    <p class="lead">Each module gives your team hours back every week. Every agency starts with Inbound. Add the rest when you're ready.</p>
+    <div class="roster">
+      <div class="agent"><div class="role">Inbound</div><p>Reads, scores and files every application the minute it lands. Acknowledges the candidate in your voice, once your consultant says so. Your ATS stays current without anyone typing.</p></div>
+      <div class="agent"><div class="role">Outbound</div><p>Finds the clients hiring in your patch this week, names the decision maker and drafts the opening line.</p></div>
+      <div class="agent"><div class="role">Database</div><p>Works your own candidates before you pay a job board for the same people again. Dormant ones re-engaged when a matching role opens.</p></div>
+      <div class="agent"><div class="role">Admin</div><p>CV formatting, interview scheduling, feedback, reference and consent chasing. The afternoon admin, gone.</p></div>
+    </div>
+    <div class="tiers">
+      <div><div class="k">Start</div><h3>Inbound</h3><p>Prove it on one desk. Every client starts here.</p></div>
+      <div><div class="k">Build</div><h3>Three modules</h3><p>Inbound, Outbound and the Admin in between.</p></div>
+      <div class="pick"><div class="k">Run</div><h3>The whole desk</h3><p>All four modules. One weekly report. The best rate per module, by design.</p></div>
+    </div>
+  </section>
+
+  <section class="sec" id="how">
+    <h2>Built on your systems. Run by us.</h2>
+    <div class="flow">
+      <div><div class="k">1 → Scope</div><h3>One call</h3><p>We map your current workflows and find where automation gives you the most time back.</p></div>
+      <div><div class="k">2 → Build</div><h3>Two to three weeks</h3><p>Fixed scope, fixed price. Your templates, your tone, your approvals.</p></div>
+      <div><div class="k">3 → Run</div><h3>Every day</h3><p>Hosted, monitored and maintained. A weekly report on what the agents did and the hours they gave back.</p></div>
+      <div><div class="k">4 → Exit</div><h3>No lock-in</h3><p>Candidate data processed under a DPA, hosted in the EU, deleted on exit. Leave, and you take the workflows with you.</p></div>
+    </div>
+    <div class="ats">
+      <span class="chip on">Zoho Recruit</span><span class="chip">Bullhorn</span><span class="chip">JobAdder</span><span class="chip">Vincere</span><span class="chip">Recruit CRM</span><span class="chip">Firefish</span><span class="chip">Loxo</span><span class="chip more">yours?</span>
+    </div>
+  </section>
+
+  <section class="book" id="book">
+    <h2>See it run on a live system.</h2>
+    <p class="lead">Thirty minutes. Bring last week's application count. We'll show you what Inbound would have done with it.</p>
+    <div class="actions">
+      <a class="btn" id="bookBtn" href="https://calendar.app.google/REPLACE_WITH_BOOKING_LINK" target="_blank" rel="noopener">Book a 30-minute call</a>
+      <span class="mail"><span id="mailText">jamie@opsautomated.co.uk</span><button type="button" id="copyMail">copy</button></span>
+    </div>
+  </section>
+
+  <footer class="foot">
+    <span>OpsAutomated is an automation agency for recruitment businesses. London, UK. Run by <a href="https://www.linkedin.com/in/REPLACE_WITH_PROFILE" target="_blank" rel="noopener">Jamie Hamilton</a>.</span>
+    <span>A trading name of Soletax Ltd, registered in England, company number 17318329.</span>
+  </footer>
+</div>
+
+<script>
+(function(){
+  var word = 'OpsAutomated';
+  var h1 = document.querySelector('.type');
+  var el = document.getElementById('typed');
+  var cur = document.getElementById('cursor');
+  var m = document.getElementById('measure');
+  function fit(){
+    h1.style.fontSize = '';
+    var base = parseFloat(getComputedStyle(h1).fontSize);
+    var avail = h1.clientWidth;
+    var need = m.offsetWidth + base * 0.21;
+    var size = Math.floor(base * avail / need);
+    h1.style.fontSize = Math.max(36, Math.min(size, 150)) + 'px';
+  }
+  if (document.fonts && document.fonts.ready) document.fonts.ready.then(fit); else fit();
+  window.addEventListener('resize', fit);
+  var reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  if (reduce) return;
+  var i = 0;
+  function render(n){
+    var s = word.slice(0, n);
+    el.innerHTML = '<span class="o">' + s.slice(0,3) + '</span><span class="a">' + s.slice(3) + '</span>';
+  }
+  cur.classList.remove('solid');
+  render(0);
+  function step(){
+    i++;
+    render(i);
+    if (i >= word.length){ setTimeout(function(){ cur.classList.add('solid'); }, 700); return; }
+    var pause = (i === 3) ? 260 : 70 + Math.random()*90;
+    setTimeout(step, pause);
+  }
+  setTimeout(step, 900);
+})();
+(function(){
+  var b = document.getElementById('copyMail'), t = document.getElementById('mailText');
+  if (!b) return;
+  b.addEventListener('click', function(){
+    var txt = t.textContent;
+    function fallback(){ var r = document.createRange(); r.selectNodeContents(t); var s = window.getSelection(); s.removeAllRanges(); s.addRange(r); }
+    if (navigator.clipboard && navigator.clipboard.writeText){
+      navigator.clipboard.writeText(txt).then(function(){ b.textContent = 'copied'; setTimeout(function(){ b.textContent = 'copy'; }, 1500); }, fallback);
+    } else fallback();
+  });
+})();
+</script>

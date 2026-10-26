@@ -1,0 +1,332 @@
+{
+  "id": "WF_ATS_ADAPTER_ZOHO",
+  "name": "ATS adapter - Zoho",
+  "description": null,
+  "nodes": [
+    {
+      "id": "00adb2dd-1922-4a33-80dd-c2c38ff7703d",
+      "name": "When Executed by Another Workflow",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {
+        "inputSource": "passthrough"
+      }
+    },
+    {
+      "id": "6dd904d9-a7af-4edc-b72e-fa1c56a5c171",
+      "name": "Zoho: upsert candidate",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        224,
+        0
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "https://recruit.zoho.uk/recruit/v2/Candidates/upsert",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "oAuth2Api",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ (() => {\n  const name = String($json.full_name ?? '').trim();\n  const parts = name.split(/\\s+/);\n  const last = parts.length > 1 ? parts.slice(-1)[0] : (name || 'Unknown');\n  const first = parts.length > 1 ? parts.slice(0, -1).join(' ') : name;\n  const email = String($json.email ?? '').trim();\n  const city = String($json.location ?? '').split(',')[0].trim();\n  const rec = {\n    \"First_Name\": first,\n    \"Last_Name\": last,\n    \"Mobile\": String($json.phone ?? '').replace(/\\s+/g, ''),\n    \"City\": city,\n    \"Current_Job_Title\": String($json.current_title ?? ''),\n    \"Current_Employer\": String($json.current_employer ?? ''),\n    \"Experience_in_Years\": Number($json.years_experience) || 0,\n    \"Skill_Set\": String($json.key_skills ?? ''),\n    \"Source\": \"Job board\"\n  };\n  if (email.includes('@')) rec[\"Email\"] = email;\n  return { \"data\": [rec], \"duplicate_check_fields\": [\"Email\"] };\n})() }}",
+        "options": {}
+      },
+      "credentials": {
+        "oAuth2Api": {
+          "id": "CRED_ZOHO_RECRUIT",
+          "name": "Zoho Recruit OAuth2"
+        }
+      }
+    },
+    {
+      "id": "cf801bb6-3c2b-4d54-a654-c9ccda1b1f95",
+      "name": "Upsert OK?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        448,
+        0
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "f0376df8-80cb-481f-8055-acf031fc3f27",
+              "leftValue": "={{ $json.data[0].code }}",
+              "rightValue": "SUCCESS",
+              "operator": {
+                "type": "string",
+                "operation": "equals",
+                "name": "filter.operator.equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "7e1bdcce-c0a3-4fea-a08d-4e82e2deb39f",
+      "name": "ATS write failed",
+      "type": "n8n-nodes-base.stopAndError",
+      "typeVersion": 1,
+      "position": [
+        672,
+        96
+      ],
+      "parameters": {
+        "errorMessage": "={{ 'Zoho upsert failed for ' + $('When Executed by Another Workflow').item.json.email + ': ' + JSON.stringify($json.data[0]) }}"
+      }
+    },
+    {
+      "id": "b6b2041e-7fb5-4c30-9632-44f8d0545dc5",
+      "name": "Zoho: associate with job",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        672,
+        -96
+      ],
+      "parameters": {
+        "method": "PUT",
+        "url": "https://recruit.zoho.uk/recruit/v2/Candidates/actions/associate",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "oAuth2Api",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ {\n  \"data\": [\n    {\n      \"jobids\": [ String($('When Executed by Another Workflow').item.json.zoho_job_id) ],\n      \"ids\": [ String($('Zoho: upsert candidate').item.json.data[0].details.id) ],\n      \"comments\": \"Associated by OpsAutomated screening\"\n    }\n  ]\n} }}",
+        "options": {}
+      },
+      "credentials": {
+        "oAuth2Api": {
+          "id": "CRED_ZOHO_RECRUIT",
+          "name": "Zoho Recruit OAuth2"
+        }
+      }
+    },
+    {
+      "id": "e9508fe4-f506-4e24-898d-90e5e0e5ee81",
+      "name": "Zoho: add note",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        896,
+        -96
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "https://recruit.zoho.uk/recruit/v2/Notes",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "oAuth2Api",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ (() => {\n  const c = $('When Executed by Another Workflow').item.json;\n  const id = String($('Zoho: upsert candidate').item.json.data[0].details.id);\n  const flags = String(c.flags ?? '').trim() || 'none';\n  const title = 'OpsAutomated screening: ' + c.job_ref + ' - ' + c.fit_score + '/10 (' + c.band + ')';\n  const content =\n    'Fit score ' + c.fit_score + '/10, band ' + c.band + '.\\n' +\n    'Rationale: ' + c.rationale + '\\n' +\n    'Flags: ' + flags + '\\n' +\n    'Salary expectation: ' + (c.salary_expectation || 'not stated') + '\\n' +\n    'Right to work: ' + (c.right_to_work || 'not stated') + '\\n' +\n    'Received: ' + c.received_at;\n  return {\n    \"data\": [\n      {\n        \"Note_Title\": title,\n        \"Note_Content\": content,\n        \"Parent_Id\": id,\n        \"se_module\": \"Candidates\"\n      }\n    ]\n  };\n})() }}",
+        "options": {}
+      },
+      "credentials": {
+        "oAuth2Api": {
+          "id": "CRED_ZOHO_RECRUIT",
+          "name": "Zoho Recruit OAuth2"
+        }
+      }
+    },
+    {
+      "id": "ef781e73-b3b4-41d2-babb-0a4195c1e07b",
+      "name": "Zoho: tag by band",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        1120,
+        -96
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ (() => {\n  const band = String($('When Executed by Another Workflow').item.json.band ?? '').trim().toUpperCase();\n  const tag = band === 'A' ? 'Band A' : band === 'B' ? 'Band B' : band === 'C' ? 'Band C' : 'Rejected';\n  const id = String($('Zoho: upsert candidate').item.json.data[0].details.id);\n  return 'https://recruit.zoho.uk/recruit/v2/Candidates/' + id + '/actions/add_tags?tag_names=' + encodeURIComponent(tag);\n})() }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "oAuth2Api",
+        "options": {}
+      },
+      "credentials": {
+        "oAuth2Api": {
+          "id": "CRED_ZOHO_RECRUIT",
+          "name": "Zoho Recruit OAuth2"
+        }
+      }
+    },
+    {
+      "id": "3b0d53b1-1239-4616-b13a-8c25cd7a2f93",
+      "name": "Pick up CV",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1344,
+        -96
+      ],
+      "parameters": {
+        "jsCode": "const trigger = $('When Executed by Another Workflow').first();\nreturn [{\n  json: $input.first().json,\n  binary: trigger.binary\n}];"
+      }
+    },
+    {
+      "id": "532cd347-9ccb-4972-a4c3-487571637b05",
+      "name": "Zoho: attach CV",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        1568,
+        -96
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ 'https://recruit.zoho.uk/recruit/v2/Candidates/' + String($('Zoho: upsert candidate').item.json.data[0].details.id) + '/Attachments?attachments_category=Resume' }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "oAuth2Api",
+        "sendBody": true,
+        "contentType": "multipart-form-data",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "parameterType": "formBinaryData",
+              "name": "file",
+              "inputDataFieldName": "attachment_0"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "credentials": {
+        "oAuth2Api": {
+          "id": "CRED_ZOHO_RECRUIT",
+          "name": "Zoho Recruit OAuth2"
+        }
+      }
+    },
+    {
+      "id": "fbde821a-5b8e-4735-ad7e-c7b654b176f9",
+      "name": "Return to caller",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1792,
+        -96
+      ],
+      "parameters": {
+        "jsCode": "const input = $('When Executed by Another Workflow').first().json;\nconst candidateId = String($('Zoho: upsert candidate').first().json.data[0].details.id);\nconst action = $('Zoho: upsert candidate').first().json.action;\n\nreturn [{\n  json: {\n    ...input,\n    zoho_candidate_id: candidateId,\n    zoho_candidate_url: 'https://recruit.zoho.uk/recruit/org13002531943/EntityInfo.do?module=Candidates&id=' + candidateId + '&submodule=Candidates',\n    ats_action: action\n  }\n}];"
+      }
+    }
+  ],
+  "connections": {
+    "When Executed by Another Workflow": {
+      "main": [
+        [
+          {
+            "node": "Zoho: upsert candidate",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Zoho: upsert candidate": {
+      "main": [
+        [
+          {
+            "node": "Upsert OK?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Upsert OK?": {
+      "main": [
+        [
+          {
+            "node": "Zoho: associate with job",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "ATS write failed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Zoho: associate with job": {
+      "main": [
+        [
+          {
+            "node": "Zoho: add note",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Zoho: add note": {
+      "main": [
+        [
+          {
+            "node": "Zoho: tag by band",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Zoho: tag by band": {
+      "main": [
+        [
+          {
+            "node": "Pick up CV",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Pick up CV": {
+      "main": [
+        [
+          {
+            "node": "Zoho: attach CV",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Zoho: attach CV": {
+      "main": [
+        [
+          {
+            "node": "Return to caller",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "nodeGroups": [],
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": true
+  },
+  "tags": []
+}

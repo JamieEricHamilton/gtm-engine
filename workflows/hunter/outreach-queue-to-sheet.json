@@ -1,0 +1,231 @@
+{
+  "id": "WF_OUTREACH_QUEUE_TO_SHEET",
+  "name": "B3 - Outreach queue to sheet",
+  "description": "Pushes the LinkedIn outreach queue (owner, URL, note, on-accept message) to the OpsAutomated outreach sheet.",
+  "nodes": [
+    {
+      "id": "9833c783-5faf-4769-8b3d-2e77fd170f07",
+      "name": "Sticky Note 75192289",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        100,
+        300
+      ],
+      "parameters": {
+        "content": "## B3 - Outreach queue to sheet\nops_outreach_queue → Google Sheet \"OpsAutomated outreach\" (tab Queue), matched on agency_id. System columns only; Jamie edits Status (sent / accepted / replied / booked / declined) and Notes in the sheet, and B3b reads them back.",
+        "color": 4,
+        "width": 520,
+        "height": 140
+      }
+    },
+    {
+      "id": "dd1857ba-16bf-40c8-8b12-a18a2a9895e2",
+      "name": "Push now (manual)",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {}
+    },
+    {
+      "id": "b5a4836a-bb87-4c82-b704-828d43d44640",
+      "name": "Load queue",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        224,
+        0
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "https://YOUR_SUPABASE_PROJECT_REF.supabase.co/rest/v1/rpc/ops_outreach_queue",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "supabaseApi",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "{}",
+        "options": {
+          "timeout": 60000
+        }
+      },
+      "executeOnce": true,
+      "credentials": {
+        "supabaseApi": {
+          "id": "CRED_SUPABASE",
+          "name": "Supabase (service role)"
+        }
+      }
+    },
+    {
+      "id": "c1161424-6d97-47b0-a46c-ec573d052519",
+      "name": "Sheet columns",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.5,
+      "position": [
+        448,
+        0
+      ],
+      "parameters": {
+        "mode": "manual",
+        "includeOtherFields": false,
+        "assignments": {
+          "assignments": [
+            {
+              "id": "a1",
+              "name": "agency_id",
+              "type": "string",
+              "value": "={{ $json.agency_id }}"
+            },
+            {
+              "id": "a2",
+              "name": "Agency",
+              "type": "string",
+              "value": "={{ $json.agency }}"
+            },
+            {
+              "id": "a3",
+              "name": "Owner",
+              "type": "string",
+              "value": "={{ $json.owner }}"
+            },
+            {
+              "id": "a4",
+              "name": "Headline",
+              "type": "string",
+              "value": "={{ $json.title || \"\" }}"
+            },
+            {
+              "id": "a5",
+              "name": "LinkedIn",
+              "type": "string",
+              "value": "={{ $json.linkedin }}"
+            },
+            {
+              "id": "a6",
+              "name": "ICP",
+              "type": "number",
+              "value": "={{ $json.icp }}"
+            },
+            {
+              "id": "a7",
+              "name": "Connection note",
+              "type": "string",
+              "value": "={{ $json.note }}"
+            },
+            {
+              "id": "a8",
+              "name": "On accept",
+              "type": "string",
+              "value": "={{ $json.on_accept || \"\" }}"
+            },
+            {
+              "id": "a9",
+              "name": "System status",
+              "type": "string",
+              "value": "={{ $json.status }}"
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "5c907ff3-2d73-4412-995a-1049ffe50fe2",
+      "name": "Upsert rows",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        672,
+        0
+      ],
+      "parameters": {
+        "resource": "sheet",
+        "operation": "appendOrUpdate",
+        "authentication": "oAuth2",
+        "documentId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "SHEET_ID_OUTREACH_QUEUE"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "Queue"
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "value": {},
+          "matchingColumns": [
+            "agency_id"
+          ],
+          "schema": []
+        },
+        "options": {
+          "handlingExtraData": "insertInNewColumn",
+          "cellFormat": "RAW"
+        }
+      },
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "CRED_GSHEETS_2",
+          "name": "Google Sheets OAuth2 (second account)"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Load queue": {
+      "main": [
+        [
+          {
+            "node": "Sheet columns",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Sheet columns": {
+      "main": [
+        [
+          {
+            "node": "Upsert rows",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Push now (manual)": {
+      "main": [
+        [
+          {
+            "node": "Load queue",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "nodeGroups": [
+    {
+      "id": "2d4f3cd6-eb40-4e23-9f68-d1dd305313e2",
+      "name": "Push",
+      "nodeIds": [
+        "b5a4836a-bb87-4c82-b704-828d43d44640",
+        "c1161424-6d97-47b0-a46c-ec573d052519",
+        "5c907ff3-2d73-4412-995a-1049ffe50fe2"
+      ],
+      "description": "Queue from Supabase, shaped to sheet columns, upserted on agency_id"
+    }
+  ],
+  "settings": {
+    "executionOrder": "v1",
+    "availableInMCP": true
+  },
+  "tags": []
+}

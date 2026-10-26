@@ -1,0 +1,343 @@
+{
+  "id": "WF_D02_LINKEDIN_ENRICH",
+  "name": "AI D2 - LinkedIn enrich",
+  "description": "Apify harvestapi/linkedin-company on account_intel.accounts: headcount, HQ, industry, funding. Raw rows landed, then mapped and disqualifiers applied.",
+  "nodes": [
+    {
+      "id": "4ee004d6-1936-463a-bbb9-0efb18f37000",
+      "name": "Sticky Note eb864c21",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        0,
+        320
+      ],
+      "parameters": {
+        "content": "## D2 - LinkedIn enrich (Apify harvestapi/linkedin-company)\nLoads non-dissolved accounts without headcount → batches of 25 → Apify run-sync → raw rows landed in account_intel.linkedin_raw → (next node) mapped onto account_intel.accounts and disqualifiers applied.\n\nPaid step: ~$4 per 1,000 companies. account_limit in Config caps spend per run.",
+        "color": 4,
+        "width": 520,
+        "height": 180
+      }
+    },
+    {
+      "id": "ecb6b54b-d317-4184-a684-1351f9d9fa44",
+      "name": "Run enrich (manual)",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {}
+    },
+    {
+      "id": "514ec2fd-f31c-48e6-8efc-b34cf671629e",
+      "name": "Config",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.5,
+      "position": [
+        224,
+        0
+      ],
+      "parameters": {
+        "mode": "manual",
+        "assignments": {
+          "assignments": [
+            {
+              "id": "c1",
+              "name": "account_limit",
+              "type": "number",
+              "value": 500
+            },
+            {
+              "id": "c2",
+              "name": "batch_size",
+              "type": "number",
+              "value": 25
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "10e01b3d-51fe-49a2-a7a3-a7705d82d7b7",
+      "name": "Load accounts to enrich",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        448,
+        0
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "https://YOUR_SUPABASE_PROJECT_REF.supabase.co/rest/v1/rpc/intel_accounts_to_enrich",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "supabaseApi",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ p_limit: $json.account_limit }) }}",
+        "options": {}
+      },
+      "credentials": {
+        "supabaseApi": {
+          "id": "CRED_SUPABASE",
+          "name": "Supabase (service role)"
+        }
+      },
+      "executeOnce": true
+    },
+    {
+      "id": "dd52b64e-9a23-4526-929e-34743bab59fa",
+      "name": "Build Apify batches",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        672,
+        0
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// One item per Apify call. URL where we have one, name search where we don't.\nconst size = Number($('Config').first().json.batch_size) || 25;\nconst rows = $input.all().map(i => i.json);\nconst out = [];\nfor (let i = 0; i < rows.length; i += size) {\n  const chunk = rows.slice(i, i + size);\n  out.push({ json: {\n    batch_id: new Date().toISOString().slice(0,16) + '-' + (out.length + 1),\n    companies: chunk.filter(r => r.linkedin_url).map(r => r.linkedin_url),\n    searches: chunk.filter(r => !r.linkedin_url).map(r => r.name),\n    account_ids: chunk.map(r => r.account_id)\n  } });\n}\nreturn out;"
+      }
+    },
+    {
+      "id": "85d67fb6-ea76-4f20-8d3a-2013c04a1919",
+      "name": "Apify LinkedIn company",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        896,
+        0
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.apify.com/v2/acts/harvestapi~linkedin-company/run-sync-get-dataset-items",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ companies: $json.companies, searches: $json.searches }) }}",
+        "options": {
+          "timeout": 300000,
+          "batching": {
+            "batch": {
+              "batchSize": 1,
+              "batchInterval": 1000
+            }
+          },
+          "response": {
+            "response": {
+              "outputPropertyName": "body",
+              "responseFormat": "text"
+            }
+          }
+        }
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "CRED_APIFY",
+          "name": "Apify (header auth)"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "ff4cfcf2-343f-4cf6-8438-dfeaf9d20fac",
+      "name": "Collect items per batch",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1120,
+        0
+      ],
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// One item per Apify call: parse the JSON array, drop bulky fields, keep batch_id from the matching input item.\n// Posts are kept as text + date only: they are the best news source for SMBs (new office, new hires abroad).\nconst b = $('Build Apify batches').item.json;\nlet rows = [];\ntry { const parsed = JSON.parse(String($json.body || '[]')); rows = Array.isArray(parsed) ? parsed : (parsed.items || []); } catch (e) { rows = []; }\nconst DROP = ['similarOrganizations', 'affiliatedPages', 'logos', 'backgroundCovers', 'backgroundCover', 'logo', 'employees'];\nconst slim = rows.map(r => {\n  const o = { ...r }; for (const k of DROP) delete o[k];\n  if (Array.isArray(o.posts)) o.posts = o.posts.slice(0, 10).map(p => ({ text: String(p.text || p.content || '').slice(0, 600), date: p.postedAt || p.date || p.createdAt || null, url: p.url || p.linkedinUrl || null }));\n  return o;\n});\nreturn { json: { batch_id: b.batch_id, items: slim, count: slim.length, sent: (b.companies || []).length + (b.searches || []).length } };"
+      }
+    },
+    {
+      "id": "3075bc81-723d-4812-b51f-a80be0cb48bb",
+      "name": "Save raw (Supabase RPC)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        1344,
+        0
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "https://YOUR_SUPABASE_PROJECT_REF.supabase.co/rest/v1/rpc/intel_save_linkedin_raw",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "supabaseApi",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ p_batch_id: $json.batch_id, p_items: $json.items }) }}",
+        "options": {
+          "batching": {
+            "batch": {
+              "batchSize": 1,
+              "batchInterval": 300
+            }
+          }
+        }
+      },
+      "credentials": {
+        "supabaseApi": {
+          "id": "CRED_SUPABASE",
+          "name": "Supabase (service role)"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "4ac16cf6-197e-4173-b23f-1379579e01a6",
+      "name": "Apply to accounts (Supabase RPC)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        1568,
+        0
+      ],
+      "parameters": {
+        "authentication": "predefinedCredentialType",
+        "jsonBody": "={{ JSON.stringify({}) }}",
+        "method": "POST",
+        "nodeCredentialType": "supabaseApi",
+        "options": {
+          "timeout": 240000
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "url": "https://YOUR_SUPABASE_PROJECT_REF.supabase.co/rest/v1/rpc/intel_apply_linkedin"
+      },
+      "credentials": {
+        "supabaseApi": {
+          "id": "CRED_SUPABASE",
+          "name": "Supabase (service role)"
+        }
+      },
+      "executeOnce": true,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "68402fa7-b75d-4046-9c34-ecf89b68e57a",
+      "name": "Every 45 min",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.4,
+      "position": [
+        0,
+        -200
+      ],
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 45
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Run enrich (manual)": {
+      "main": [
+        [
+          {
+            "node": "Config",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Config": {
+      "main": [
+        [
+          {
+            "node": "Load accounts to enrich",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Load accounts to enrich": {
+      "main": [
+        [
+          {
+            "node": "Build Apify batches",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Apify batches": {
+      "main": [
+        [
+          {
+            "node": "Apify LinkedIn company",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Apify LinkedIn company": {
+      "main": [
+        [
+          {
+            "node": "Collect items per batch",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Collect items per batch": {
+      "main": [
+        [
+          {
+            "node": "Save raw (Supabase RPC)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save raw (Supabase RPC)": {
+      "main": [
+        [
+          {
+            "node": "Apply to accounts (Supabase RPC)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Every 45 min": {
+      "main": [
+        [
+          {
+            "node": "Config",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "nodeGroups": [],
+  "settings": {
+    "executionOrder": "v1",
+    "availableInMCP": true,
+    "errorWorkflow": "WF_ERROR_ALERT",
+    "timezone": "Europe/London",
+    "saveDataSuccessExecution": "none"
+  },
+  "tags": []
+}

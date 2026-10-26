@@ -1,0 +1,614 @@
+{
+  "id": "WF_D08_PUSH_TO_SHEET",
+  "name": "AI D8 - Push to sheet",
+  "description": "Re-score and push the A/B call list to the SDR's Google Sheet, matched on account_id, system columns only.",
+  "nodes": [
+    {
+      "id": "ffb12831-b166-4dd8-947b-9bb5aa77bdf0",
+      "name": "Sticky Note 7aae759a",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        0,
+        300
+      ],
+      "parameters": {
+        "content": "## D8 - Push to the SDR's sheet\nDaily 07:00 (or manual): re-score → intel_sheet_rows (current A/B not closed by the SDR, plus anything previously pushed so its band updates) → Google Sheets Append or Update Row matched on account_id. Only the system columns A-J are written. Status + Notes (K, L) are the SDR's; Sequence + Sequence date (M, N) are Jamie's. Neither is ever touched by the push.\n\nFix sheet dropdowns re-applies the headers and all three dropdowns after every push (self-heal): Status = Worked / Meeting booked / Not a fit, Sequence = In sequence / Finished sequence, Sequence date = any date. To change a dropdown, edit that node, not the sheet.",
+        "color": 4,
+        "width": 560,
+        "height": 160
+      }
+    },
+    {
+      "id": "4f762892-afeb-45da-b77c-cda74ca8452b",
+      "name": "Daily 07:00",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.4,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "daysInterval": 1,
+              "field": "days",
+              "triggerAtHour": 7,
+              "triggerAtMinute": 0
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "17e784d3-da29-445c-b668-e4929c9cb09a",
+      "name": "Score accounts (Supabase RPC)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        224,
+        96
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "https://YOUR_SUPABASE_PROJECT_REF.supabase.co/rest/v1/rpc/intel_score_accounts",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "supabaseApi",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ p_version: \"v1.6\" }) }}",
+        "options": {
+          "timeout": 240000
+        }
+      },
+      "credentials": {
+        "supabaseApi": {
+          "id": "CRED_SUPABASE",
+          "name": "Supabase (service role)"
+        }
+      },
+      "executeOnce": true,
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000
+    },
+    {
+      "id": "53a161c6-dbc0-4235-92b2-824af8c416cc",
+      "name": "Push now (manual)",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        192
+      ],
+      "parameters": {}
+    },
+    {
+      "id": "6ff18e13-62ea-43a0-96ba-f178b6b4a231",
+      "name": "Sheet rows (Supabase RPC)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        448,
+        96
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "https://YOUR_SUPABASE_PROJECT_REF.supabase.co/rest/v1/rpc/intel_sheet_rows",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "supabaseApi",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({}) }}",
+        "options": {
+          "timeout": 120000
+        }
+      },
+      "credentials": {
+        "supabaseApi": {
+          "id": "CRED_SUPABASE",
+          "name": "Supabase (service role)"
+        }
+      },
+      "executeOnce": true
+    },
+    {
+      "id": "2d47d4aa-b613-4050-8862-9a3552041a48",
+      "name": "Upsert rows in sheet",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        672,
+        96
+      ],
+      "parameters": {
+        "resource": "sheet",
+        "operation": "appendOrUpdate",
+        "authentication": "oAuth2",
+        "documentId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "SHEET_ID_SDR_CALL_LIST"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "Sheet1"
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "value": {},
+          "matchingColumns": [
+            "account_id"
+          ],
+          "schema": []
+        },
+        "options": {
+          "handlingExtraData": "insertInNewColumn",
+          "cellFormat": "RAW"
+        }
+      },
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "CRED_GSHEETS_2",
+          "name": "Google Sheets OAuth2 (second account)"
+        }
+      }
+    },
+    {
+      "id": "7079e8e6-af2e-446d-9cd4-fc7f2b250f8e",
+      "name": "New since yesterday (Supabase RPC)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        900,
+        96
+      ],
+      "parameters": {
+        "authentication": "predefinedCredentialType",
+        "jsonBody": "={{ JSON.stringify({ p_hours: 25 }) }}",
+        "method": "POST",
+        "nodeCredentialType": "supabaseApi",
+        "options": {
+          "response": {
+            "response": {
+              "outputPropertyName": "body",
+              "responseFormat": "text"
+            }
+          },
+          "timeout": 60000
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "url": "https://YOUR_SUPABASE_PROJECT_REF.supabase.co/rest/v1/rpc/intel_new_since"
+      },
+      "credentials": {
+        "supabaseApi": {
+          "id": "CRED_SUPABASE",
+          "name": "Supabase (service role)"
+        }
+      },
+      "executeOnce": true
+    },
+    {
+      "id": "3a9e5369-9bbb-4d27-82fb-5326da7e170f",
+      "name": "Build morning note",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1120,
+        96
+      ],
+      "parameters": {
+        "jsCode": "let rows = [];\ntry { rows = JSON.parse(String($input.first().json.body || '[]')); } catch (e) { rows = []; }\nlet apify = '';\ntry { let v = String($('Apify usage (Supabase RPC)').first().json.body || ''); v = JSON.parse(v); if (typeof v === 'string') v = JSON.parse(v); if (v && v.used_usd != null) apify = 'Apify: $' + Number(v.used_usd).toFixed(2) + ' of $' + v.limit_usd + ' this cycle'; } catch (e) { apify = ''; }\nconst a = rows.filter(r => r.band === 'A'), b = rows.filter(r => r.band === 'B');\nconst line = r => '• ' + r.account + ' (' + r.lead_product + '): ' + r.trigger_line;\nlet body = 'Morning. ' + (rows.length ? rows.length + ' new account' + (rows.length > 1 ? 's' : '') + ' on the call list overnight.' : 'Nothing new on the call list overnight.') + '\\n';\nif (a.length) body += '\\nA band\\n' + a.map(line).join('\\n') + '\\n';\nif (b.length) body += '\\nB band\\n' + b.map(line).join('\\n') + '\\n';\nif (apify) body += '\\n' + apify;\nif (body.length > 3900) body = body.slice(0, 3850) + '\\n…more on the sheet';\nreturn [{ json: { body } }];",
+        "mode": "runOnceForAllItems"
+      }
+    },
+    {
+      "id": "91fa328c-191e-4574-93dd-83115bd1d23d",
+      "name": "Email new accounts",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.2,
+      "position": [
+        1340,
+        96
+      ],
+      "parameters": {
+        "emailType": "text",
+        "message": "={{ $json.body }}",
+        "options": {},
+        "sendTo": "owner@example.com",
+        "subject": "={{ $json.subject }}"
+      },
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "CRED_GMAIL",
+          "name": "Gmail OAuth2"
+        }
+      },
+      "webhookId": "00000000-0000-4000-8000-000000000006",
+      "disabled": true
+    },
+    {
+      "id": "b0354839-cdd1-47f4-a122-d61c5b886df5",
+      "name": "Removals (Supabase RPC)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        900,
+        320
+      ],
+      "parameters": {
+        "authentication": "predefinedCredentialType",
+        "jsonBody": "={{ JSON.stringify({}) }}",
+        "method": "POST",
+        "nodeCredentialType": "supabaseApi",
+        "options": {
+          "response": {
+            "response": {
+              "outputPropertyName": "body",
+              "responseFormat": "text"
+            }
+          },
+          "timeout": 60000
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "url": "https://YOUR_SUPABASE_PROJECT_REF.supabase.co/rest/v1/rpc/intel_sheet_removals"
+      },
+      "credentials": {
+        "supabaseApi": {
+          "id": "CRED_SUPABASE",
+          "name": "Supabase (service role)"
+        }
+      },
+      "executeOnce": true
+    },
+    {
+      "id": "9f9a96b2-b58a-41c4-9072-79a3148d786f",
+      "name": "Read sheet",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        1120,
+        320
+      ],
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "SHEET_ID_SDR_CALL_LIST"
+        },
+        "filtersUI": {},
+        "operation": "read",
+        "options": {
+          "dataLocationOnSheet": {
+            "values": {
+              "rangeDefinition": "detectAutomatically"
+            }
+          }
+        },
+        "resource": "sheet",
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "Sheet1"
+        }
+      },
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "CRED_GSHEETS_2",
+          "name": "Google Sheets OAuth2 (second account)"
+        }
+      },
+      "alwaysOutputData": true,
+      "executeOnce": true
+    },
+    {
+      "id": "46517a88-f4fe-4339-9bea-a6768ec37123",
+      "name": "Rows to delete",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1340,
+        320
+      ],
+      "parameters": {
+        "jsCode": "// Pattern: never delete by position you have not just read. Read the sheet, map account_id -> row_number, delete bottom-up so earlier deletes do not shift later rows.\nlet removals = [];\ntry { removals = JSON.parse(String($('Removals (Supabase RPC)').first().json.body || '[]')); } catch (e) { removals = []; }\nconst ids = new Set(removals.map(r => String(r.account_id)));\nif (!ids.size) return [];\nconst rows = $input.all().map(i => i.json).filter(r => r && r.row_number && ids.has(String(r.account_id)));\nrows.sort((a, b) => Number(b.row_number) - Number(a.row_number));\nreturn rows.map(r => ({ json: { account_id: r.account_id, account: r.Account, row_number: Number(r.row_number), reason: (removals.find(x => String(x.account_id) === String(r.account_id)) || {}).reason || '' } }));",
+        "mode": "runOnceForAllItems"
+      }
+    },
+    {
+      "id": "81e0e7f6-e6d6-4479-b542-53c287f1fbb3",
+      "name": "Delete row",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        1560,
+        320
+      ],
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "SHEET_ID_SDR_CALL_LIST"
+        },
+        "numberToDelete": 1,
+        "operation": "delete",
+        "resource": "sheet",
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "Sheet1"
+        },
+        "startIndex": "={{ $json.row_number }}",
+        "toDelete": "rows"
+      },
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "CRED_GSHEETS_2",
+          "name": "Google Sheets OAuth2 (second account)"
+        }
+      }
+    },
+    {
+      "id": "9ed26d75-3837-4ed0-a8b8-a35e24cb46cb",
+      "name": "Fix sheet dropdowns",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        900,
+        -120
+      ],
+      "parameters": {
+        "authentication": "predefinedCredentialType",
+        "jsonBody": "{\"requests\":[{\"updateCells\":{\"range\":{\"sheetId\":0,\"startRowIndex\":0,\"endRowIndex\":1,\"startColumnIndex\":12,\"endColumnIndex\":14},\"rows\":[{\"values\":[{\"userEnteredValue\":{\"stringValue\":\"Sequence\"}},{\"userEnteredValue\":{\"stringValue\":\"Sequence date\"}}]}],\"fields\":\"userEnteredValue\"}},{\"setDataValidation\":{\"range\":{\"sheetId\":0,\"startRowIndex\":1,\"endRowIndex\":1000,\"startColumnIndex\":10,\"endColumnIndex\":11},\"rule\":{\"condition\":{\"type\":\"ONE_OF_LIST\",\"values\":[{\"userEnteredValue\":\"Worked\"},{\"userEnteredValue\":\"Meeting booked\"},{\"userEnteredValue\":\"Not a fit\"}]},\"strict\":true,\"showCustomUi\":true}}},{\"setDataValidation\":{\"range\":{\"sheetId\":0,\"startRowIndex\":1,\"endRowIndex\":1000,\"startColumnIndex\":12,\"endColumnIndex\":13},\"rule\":{\"condition\":{\"type\":\"ONE_OF_LIST\",\"values\":[{\"userEnteredValue\":\"In sequence\"},{\"userEnteredValue\":\"Finished sequence\"}]},\"strict\":true,\"showCustomUi\":true}}},{\"setDataValidation\":{\"range\":{\"sheetId\":0,\"startRowIndex\":1,\"endRowIndex\":1000,\"startColumnIndex\":13,\"endColumnIndex\":14},\"rule\":{\"condition\":{\"type\":\"DATE_IS_VALID\"},\"strict\":false,\"showCustomUi\":true}}}]}",
+        "method": "POST",
+        "nodeCredentialType": "googleSheetsOAuth2Api",
+        "options": {
+          "timeout": 60000
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "url": "https://sheets.googleapis.com/v4/spreadsheets/SHEET_ID_SDR_CALL_LIST:batchUpdate"
+      },
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "CRED_GSHEETS_2",
+          "name": "Google Sheets OAuth2 (second account)"
+        }
+      },
+      "notes": "Self-heal: rows appended or deleted by this workflow can come back with inconsistent validation, so one rule is re-applied to the whole Status column after every push.",
+      "onError": "continueRegularOutput",
+      "executeOnce": true
+    },
+    {
+      "id": "61958e4d-7e65-4482-94d0-262e24b2f69b",
+      "name": "Called by another workflow",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        0,
+        400
+      ],
+      "parameters": {
+        "inputSource": "passthrough"
+      }
+    },
+    {
+      "id": "5fc49523-b639-401a-9587-a26b1e5a18a4",
+      "name": "Apify usage (Supabase RPC)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        900,
+        -300
+      ],
+      "parameters": {
+        "authentication": "predefinedCredentialType",
+        "jsonBody": "{\"p_key\": \"apify_usage\"}",
+        "method": "POST",
+        "nodeCredentialType": "supabaseApi",
+        "options": {
+          "response": {
+            "response": {
+              "outputPropertyName": "body",
+              "responseFormat": "text"
+            }
+          },
+          "timeout": 30000
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "url": "https://YOUR_SUPABASE_PROJECT_REF.supabase.co/rest/v1/rpc/intel_get_setting"
+      },
+      "credentials": {
+        "supabaseApi": {
+          "id": "CRED_SUPABASE",
+          "name": "Supabase (service role)"
+        }
+      },
+      "onError": "continueRegularOutput",
+      "alwaysOutputData": true,
+      "executeOnce": true
+    },
+    {
+      "id": "4157d5a9-7d4a-4968-ad7c-500d694e5f38",
+      "name": "Telegram morning note",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        1340,
+        -100
+      ],
+      "parameters": {
+        "additionalFields": {
+          "appendAttribution": false,
+          "disable_web_page_preview": true
+        },
+        "chatId": "TELEGRAM_CHAT_ID",
+        "text": "={{ $json.body }}"
+      },
+      "credentials": {
+        "telegramApi": {
+          "id": "CRED_TELEGRAM_ALERTS",
+          "name": "Telegram alerts bot"
+        }
+      },
+      "webhookId": "00000000-0000-4000-8000-000000000007"
+    }
+  ],
+  "connections": {
+    "Score accounts (Supabase RPC)": {
+      "main": [
+        [
+          {
+            "node": "Sheet rows (Supabase RPC)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Push now (manual)": {
+      "main": [
+        [
+          {
+            "node": "Score accounts (Supabase RPC)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Sheet rows (Supabase RPC)": {
+      "main": [
+        [
+          {
+            "node": "Upsert rows in sheet",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Daily 07:00": {
+      "main": [
+        [
+          {
+            "node": "Score accounts (Supabase RPC)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Upsert rows in sheet": {
+      "main": [
+        [
+          {
+            "node": "Removals (Supabase RPC)",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Fix sheet dropdowns",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Apify usage (Supabase RPC)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "New since yesterday (Supabase RPC)": {
+      "main": [
+        [
+          {
+            "node": "Build morning note",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Removals (Supabase RPC)": {
+      "main": [
+        [
+          {
+            "node": "Read sheet",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read sheet": {
+      "main": [
+        [
+          {
+            "node": "Rows to delete",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Rows to delete": {
+      "main": [
+        [
+          {
+            "node": "Delete row",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Called by another workflow": {
+      "main": [
+        [
+          {
+            "node": "Score accounts (Supabase RPC)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Apify usage (Supabase RPC)": {
+      "main": [
+        [
+          {
+            "node": "New since yesterday (Supabase RPC)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build morning note": {
+      "main": [
+        [
+          {
+            "node": "Telegram morning note",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "nodeGroups": [],
+  "settings": {
+    "executionOrder": "v1",
+    "availableInMCP": true,
+    "errorWorkflow": "WF_ERROR_ALERT",
+    "timezone": "Europe/London"
+  },
+  "tags": []
+}

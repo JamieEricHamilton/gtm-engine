@@ -1,0 +1,21 @@
+# OpsAutomated
+
+> OpsAutomated is an automation agency that builds, runs and maintains AI agents for small UK recruitment agencies, on top of the ATS and tools they already use. Outcome: more placements without adding payroll.
+
+- Website: https://opsautomated.co.uk/
+- Contact: jamie@opsautomated.co.uk
+- Book a call: https://calendar.app.google/a3V7NKaze5B8Ru9L6
+- Location: London, UK. Clients across the UK.
+
+## Agents
+- Resourcer: reads, scores and files every inbound application in the ATS the minute it lands; acknowledges the candidate once a consultant approves.
+- Hunter: finds clients hiring in the agency's patch, names the decision maker, drafts the opening line.
+- Sourcer: matches new roles against the agency's existing candidate database before paying job boards again.
+- Coordinator: CV formatting, interview scheduling, feedback and reference chasing.
+- Librarian: keeps the ATS current - activity logged, statuses updated, duplicates merged, consent chased.
+
+## Works with
+Zoho Recruit, Bullhorn, JobAdder, Vincere, Recruit CRM, Firefish, Loxo.
+
+## Pages
+- /: the one page. What an AI agent is, what gets automated, the five agents, how we work, book a call.

@@ -1,0 +1,459 @@
+{
+  "id": "WF_D01_REGISTRY_RESOLVE",
+  "name": "AI D1 - Registry resolve",
+  "description": "Companies House resolve for account_intel.accounts: confidence-scored name match, profile, PSC; saves via intel_save_registry; disqualifies dissolved.",
+  "nodes": [
+    {
+      "id": "8bc07744-ce8e-4c8f-a621-5743b7c8b3f5",
+      "name": "Sticky Note ed7c0c5c",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        0,
+        320
+      ],
+      "parameters": {
+        "content": "## D1 - Registry resolve (Companies House)\nLoads accounts with no registry row → CH search → confidence-scored match (1.0 exact, 0.9 domain/previous name, 0.85 prefix, 0.7 tokens = review) → profile + PSC for matches → intel_save_registry.\n\nNo-match is saved too, so re-running only touches new accounts. Dissolved / liquidation / administration are disqualified in the RPC. Each CH node throttled to 2 req/s (limit 600 per 5 min).\n\nIrish (.ie) rows get a CH search too; CRO lookup is a later addition.",
+        "color": 4,
+        "width": 520,
+        "height": 220
+      }
+    },
+    {
+      "id": "da8ade8f-9733-46e5-9243-6c79635ad728",
+      "name": "Run resolve (manual)",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        96
+      ],
+      "parameters": {}
+    },
+    {
+      "id": "fcc4820e-14e0-4619-9c38-063835cc28a2",
+      "name": "Load accounts to resolve",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        224,
+        96
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "https://YOUR_SUPABASE_PROJECT_REF.supabase.co/rest/v1/rpc/intel_accounts_to_resolve",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "supabaseApi",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ p_limit: 500 }) }}",
+        "options": {}
+      },
+      "credentials": {
+        "supabaseApi": {
+          "id": "CRED_SUPABASE",
+          "name": "Supabase (service role)"
+        }
+      },
+      "executeOnce": true
+    },
+    {
+      "id": "55522820-29a3-4f9d-83b0-65531bf7671e",
+      "name": "Companies House search",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        448,
+        96
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "https://api.company-information.service.gov.uk/search/companies",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBasicAuth",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "q",
+              "value": "={{ $json.search_name }}"
+            },
+            {
+              "name": "items_per_page",
+              "value": "8"
+            }
+          ]
+        },
+        "options": {
+          "batching": {
+            "batch": {
+              "batchSize": 2,
+              "batchInterval": 1100
+            }
+          }
+        }
+      },
+      "credentials": {
+        "httpBasicAuth": {
+          "id": "CRED_COMPANIES_HOUSE",
+          "name": "Companies House API (basic auth)"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "a5883c61-b808-498e-83c0-0901b1a91255",
+      "name": "Pick CH match",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        672,
+        96
+      ],
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// Confidence-scored match. Same normalisation as ops.normalise_company_name.\n// 1.0 exact normalised name; 0.9 domain stem equals normalised title, or a previous company name matches;\n// 0.85 prefix (>= 6 chars, lengths within 60%); 0.7 weak prefix or token overlap incl. the brand word (review only).\n// If the best hit is not active and an active candidate scores >= 0.7, the active one wins.\n// CRO-hinted (.ie) rows cap at 0.7: a UK registry hit is never trusted for an Irish domain.\nconst a = $('Prepare search name').item.json;\nconst norm = s => String(s || '').toLowerCase().replace(/\\b(ltd|limited|llp|plc|uk|group|holdings)\\b/g, '').replace(/[^a-z0-9]/g, '');\nconst toks = s => String(s || '').toLowerCase().replace(/\\b(ltd|limited|llp|plc|uk|group|holdings|the|and|co|company)\\b/g, ' ').split(/[^a-z0-9]+/).filter(t => t.length > 2);\nconst items = Array.isArray($json.items) ? $json.items : [];\nconst target = norm(a.search_name || a.name);\nconst targetFull = norm(a.name);\nconst stem = a.domain ? norm(String(a.domain).split('.')[0]) : '';\nconst A = toks(a.search_name || a.name); const brand = A[0] || '';\nconst score = i => {\n  const t = norm(i.title);\n  if (!t) return [0, 'none'];\n  if (t === target || t === targetFull) return [1.0, 'exact'];\n  if (stem && stem.length >= 5 && t === stem) return [0.9, 'domain'];\n  if (Array.isArray(i.previous_company_names) && i.previous_company_names.some(p => norm(p.name) === target)) return [0.9, 'previous_name'];\n  if (target.length >= 6 && (t.startsWith(target) || target.startsWith(t))) {\n    const r = Math.min(t.length, target.length) / Math.max(t.length, target.length);\n    return r >= 0.6 ? [0.85, 'prefix'] : [0.7, 'weak_prefix'];\n  }\n  const B = new Set(toks(i.title));\n  const inter = A.filter(x => B.has(x)).length;\n  const j = (A.length && B.size) ? inter / (A.length + B.size - inter) : 0;\n  if (j >= 0.6 && inter >= 2 && brand && B.has(brand)) return [0.7, 'tokens'];\n  return [0, 'none'];\n};\nconst scored = items.map(i => { const [c, b] = score(i); return { i, c, b }; }).filter(x => x.c > 0);\nscored.sort((x, y) => y.c - x.c);\nlet best = scored[0] || null;\nif (best && best.i.company_status !== 'active') {\n  const alt = scored.find(x => x.i.company_status === 'active' && x.c >= 0.7);\n  if (alt) best = alt;\n}\nlet conf = best ? best.c : 0;\nif (best && a.registry_hint === 'CRO') conf = Math.min(conf, 0.7);\nreturn { json: {\n  account_id: a.account_id, name: a.name, domain: a.domain, registry_hint: a.registry_hint,\n  company_number: best ? best.i.company_number : null,\n  registered_name: best ? best.i.title : null,\n  status: best ? best.i.company_status : null,\n  incorporated_on: best ? (best.i.date_of_creation || null) : null,\n  match_confidence: conf, matched_by: best ? best.b : 'none',\n  candidates: items.slice(0, 3).map(i => ({ n: i.company_number, t: i.title, s: i.company_status }))\n} };"
+      }
+    },
+    {
+      "id": "45278864-dbe4-4ae0-85bc-57ecf82d1ec3",
+      "name": "Match found?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        896,
+        96
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "m1",
+              "leftValue": "={{ $json.company_number }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notEmpty",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "95e24bb3-f26a-4e70-b3ec-b3ffb59df228",
+      "name": "Companies House profile",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        1120,
+        0
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "=https://api.company-information.service.gov.uk/company/{{ $json.company_number }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBasicAuth",
+        "options": {
+          "batching": {
+            "batch": {
+              "batchSize": 2,
+              "batchInterval": 1100
+            }
+          }
+        }
+      },
+      "credentials": {
+        "httpBasicAuth": {
+          "id": "CRED_COMPANIES_HOUSE",
+          "name": "Companies House API (basic auth)"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "29803ffb-7150-4b74-8471-fb0605059098",
+      "name": "Companies House PSC",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        1344,
+        0
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "=https://api.company-information.service.gov.uk/company/{{ $('Pick CH match').item.json.company_number }}/persons-with-significant-control",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBasicAuth",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "items_per_page",
+              "value": "25"
+            }
+          ]
+        },
+        "options": {
+          "batching": {
+            "batch": {
+              "batchSize": 2,
+              "batchInterval": 1100
+            }
+          }
+        }
+      },
+      "credentials": {
+        "httpBasicAuth": {
+          "id": "CRED_COMPANIES_HOUSE",
+          "name": "Companies House API (basic auth)"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "57e00552-c5c2-4b2c-b212-edc5d4a9e15b",
+      "name": "Build registry row",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1568,
+        0
+      ],
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// Combine match + profile + PSC into one intel_save_registry payload.\nconst m = $('Pick CH match').item.json;\nlet p = {}; try { p = $('Companies House profile').item.json || {}; } catch (e) {}\nconst pscItems = Array.isArray($json.items) ? $json.items : [];\nconst UK = new Set(['united kingdom','england','scotland','wales','northern ireland','great britain','uk','england and wales']);\nconst country = x => String(x || '').toLowerCase().trim();\nlet foreign_psc = false;\nfor (const s of pscItems) {\n  if (s.ceased_on) continue;\n  const corp = /corporate|legal-person/.test(String(s.kind || ''));\n  const c = country((s.identification && (s.identification.country_registered || s.identification.place_registered)) || (s.address && s.address.country));\n  if (corp && c && !UK.has(c) && !/united kingdom|england|scotland|wales/.test(c)) foreign_psc = true;\n}\nconst acc = (p.accounts && p.accounts.last_accounts && p.accounts.last_accounts.type) ? p.accounts.last_accounts.type : null;\nreturn { json: {\n  p_account_id: m.account_id,\n  p_registry: 'CH',\n  p_company_number: m.company_number,\n  p_registered_name: p.company_name || m.registered_name,\n  p_status: p.company_status || m.status,\n  p_incorporated_on: p.date_of_creation || m.incorporated_on || null,\n  p_sic_codes: Array.isArray(p.sic_codes) ? p.sic_codes : null,\n  p_accounts_type: acc,\n  p_foreign_psc: foreign_psc,\n  p_officer_countries: null,\n  p_match_confidence: m.match_confidence,\n  p_matched_by: m.matched_by,\n  p_raw: { company_type: p.type || null, registered_office: p.registered_office_address || null, psc_count: pscItems.length, candidates: m.candidates }\n} };"
+      }
+    },
+    {
+      "id": "d0bbeaa6-6214-4d20-bdd5-83f8ab8814f0",
+      "name": "Save registry (Supabase RPC)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        1792,
+        96
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "https://YOUR_SUPABASE_PROJECT_REF.supabase.co/rest/v1/rpc/intel_save_registry",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "supabaseApi",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json) }}",
+        "options": {
+          "batching": {
+            "batch": {
+              "batchSize": 10,
+              "batchInterval": 250
+            }
+          }
+        }
+      },
+      "credentials": {
+        "supabaseApi": {
+          "id": "CRED_SUPABASE",
+          "name": "Supabase (service role)"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "8c369678-d968-4eac-b8e5-2c0f5ef2f24e",
+      "name": "No-match row",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1568,
+        192
+      ],
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const m = $json;\nreturn { json: { p_account_id: m.account_id, p_registry: m.registry_hint || 'CH', p_company_number: null, p_registered_name: null, p_status: null, p_incorporated_on: null, p_sic_codes: null, p_accounts_type: null, p_foreign_psc: null, p_officer_countries: null, p_match_confidence: 0, p_matched_by: 'none', p_raw: { candidates: m.candidates || [] } } };"
+      }
+    },
+    {
+      "id": "4ceb97cc-0dab-47df-86f0-9a8e2db7fbf5",
+      "name": "Prepare search name",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        448,
+        -200
+      ],
+      "parameters": {
+        "jsCode": "// Search Companies House on the brand, not the strapline. \"MacKenzie King - Accountancy and Finance Recruitment\" → \"MacKenzie King\".\nconst raw = String($json.name || '').trim();\nlet s = raw.split(/\\s+[-|:–]\\s+/)[0].trim();\nif (s.length < 4) s = raw;\ns = s.replace(/[.,]+$/, '').trim();\nreturn { json: { ...$json, search_name: s } };",
+        "mode": "runOnceForEachItem"
+      }
+    },
+    {
+      "id": "f84ca131-6f08-4ff1-a3bd-b719eac0326e",
+      "name": "Every 30 min",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.4,
+      "position": [
+        0,
+        -200
+      ],
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 30
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Run resolve (manual)": {
+      "main": [
+        [
+          {
+            "node": "Load accounts to resolve",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Companies House search": {
+      "main": [
+        [
+          {
+            "node": "Pick CH match",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Pick CH match": {
+      "main": [
+        [
+          {
+            "node": "Match found?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Match found?": {
+      "main": [
+        [
+          {
+            "node": "Companies House profile",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "No-match row",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Companies House profile": {
+      "main": [
+        [
+          {
+            "node": "Companies House PSC",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Companies House PSC": {
+      "main": [
+        [
+          {
+            "node": "Build registry row",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build registry row": {
+      "main": [
+        [
+          {
+            "node": "Save registry (Supabase RPC)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "No-match row": {
+      "main": [
+        [
+          {
+            "node": "Save registry (Supabase RPC)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Load accounts to resolve": {
+      "main": [
+        [
+          {
+            "node": "Prepare search name",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare search name": {
+      "main": [
+        [
+          {
+            "node": "Companies House search",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Every 30 min": {
+      "main": [
+        [
+          {
+            "node": "Load accounts to resolve",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "nodeGroups": [],
+  "settings": {
+    "executionOrder": "v1",
+    "availableInMCP": true,
+    "errorWorkflow": "WF_ERROR_ALERT",
+    "timezone": "Europe/London",
+    "saveDataSuccessExecution": "none"
+  },
+  "tags": []
+}

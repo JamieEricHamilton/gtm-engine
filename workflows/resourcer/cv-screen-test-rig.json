@@ -1,0 +1,195 @@
+{
+  "id": "WF_CV_SCREEN_TEST_RIG",
+  "name": "M2 - CV screen",
+  "description": null,
+  "nodes": [
+    {
+      "parameters": {
+        "formTitle": "CV screening test",
+        "formFields": {
+          "values": [
+            {
+              "fieldLabel": "Job spec",
+              "fieldType": "textarea",
+              "requiredField": true
+            },
+            {
+              "fieldLabel": "CV",
+              "fieldType": "file",
+              "requiredField": true
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.formTrigger",
+      "typeVersion": 2.6,
+      "position": [
+        0,
+        0
+      ],
+      "id": "e2277321-edf3-4960-87cf-824bac1d2889",
+      "name": "On form submission",
+      "webhookId": "00000000-0000-4000-8000-000000000005"
+    },
+    {
+      "parameters": {
+        "operation": "pdf",
+        "binaryPropertyName": "CV",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.extractFromFile",
+      "typeVersion": 1.1,
+      "position": [
+        224,
+        0
+      ],
+      "id": "71378eaa-652a-4419-9981-f9c97abb69b5",
+      "name": "Extract from File"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=You are a recruitment screening assistant. You will be given a job specification and the raw text of a candidate's CV.\n\nExtract the candidate's details and score their fit for the role. Return ONLY the JSON object requested, no commentary.\n\nRules:\n- Every field must be a string, number or list as shown in the schema. Never use null. For anything not stated in the CV, use the exact string \"not stated\". Do not guess.\n- years_experience is total relevant years as a whole number. If unknown, use 0.\n- fit_score is 1 to 10 against the job spec. 8-10 = strong match, 5-7 = partial, 1-4 = poor.\n- band: A if score 8-10, B if 5-7, C if 1-4.\n- rationale: two sentences, specific to this CV and this spec.\n- flags: list any of \"no_right_to_work_stated\", \"salary_mismatch\", \"location_mismatch\", \"career_gap\", \"missing_contact_details\" that apply. Empty list if none.\n\nJOB SPEC:\n{{ $('On form submission').item.json['Job spec'] }}\n\nCV TEXT:\n{{ $json.text }}",
+        "hasOutputParser": true,
+        "batching": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.9,
+      "position": [
+        448,
+        0
+      ],
+      "id": "065fb9f8-0085-451c-a769-a2bd951e6585",
+      "name": "Basic LLM Chain"
+    },
+    {
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "value": "claude-sonnet-5-5",
+          "mode": "list",
+          "cachedResultName": "Claude Sonnet 5.5"
+        },
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatAnthropic",
+      "typeVersion": 1.6,
+      "position": [
+        336,
+        208
+      ],
+      "id": "a25ee892-156f-457b-a6fb-8bbcffe976b9",
+      "name": "Anthropic Chat Model",
+      "credentials": {
+        "anthropicApi": {
+          "id": "CRED_ANTHROPIC",
+          "name": "Anthropic API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsonSchemaExample": "{\n  \"full_name\": \"Jane Smith\",\n  \"email\": \"jane@example.com\",\n  \"phone\": \"07700 900000\",\n  \"location\": \"Chelmsford, Essex\",\n  \"current_title\": \"Senior Software Engineer\",\n  \"current_employer\": \"Acme Ltd\",\n  \"years_experience\": 7,\n  \"key_skills\": [\"Python\", \"AWS\", \"PostgreSQL\"],\n  \"salary_expectation\": \"£70,000\",\n  \"right_to_work\": \"UK citizen\",\n  \"fit_score\": 8,\n  \"band\": \"A\",\n  \"rationale\": \"Strong match on core stack and seniority. Location is commutable and salary is within band.\",\n  \"flags\": []\n}",
+        "autoFix": true
+      },
+      "type": "@n8n/n8n-nodes-langchain.outputParserStructured",
+      "typeVersion": 1.3,
+      "position": [
+        592,
+        208
+      ],
+      "id": "d2fd76ed-c49e-4741-946a-90347bf75621",
+      "name": "Structured Output Parser"
+    },
+    {
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "value": "claude-sonnet-5-5",
+          "mode": "list",
+          "cachedResultName": "Claude Sonnet 5.5"
+        },
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatAnthropic",
+      "typeVersion": 1.6,
+      "position": [
+        528,
+        416
+      ],
+      "id": "d8f65b79-bbb8-4592-ae60-f8d13f8c1310",
+      "name": "Anthropic Chat Model1",
+      "credentials": {
+        "anthropicApi": {
+          "id": "CRED_ANTHROPIC",
+          "name": "Anthropic API"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "On form submission": {
+      "main": [
+        [
+          {
+            "node": "Extract from File",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract from File": {
+      "main": [
+        [
+          {
+            "node": "Basic LLM Chain",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Anthropic Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Basic LLM Chain",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Structured Output Parser": {
+      "ai_outputParser": [
+        [
+          {
+            "node": "Basic LLM Chain",
+            "type": "ai_outputParser",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Anthropic Chat Model1": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Structured Output Parser",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "nodeGroups": [],
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": true
+  },
+  "tags": []
+}

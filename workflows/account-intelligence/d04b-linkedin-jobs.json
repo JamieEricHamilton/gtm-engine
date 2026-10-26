@@ -1,0 +1,353 @@
+{
+  "id": "WF_D04B_LINKEDIN_JOBS",
+  "name": "AI D4b - LinkedIn jobs",
+  "description": "LinkedIn-posted roles per account via Apify, mapped to account_intel.jobs with signal flags.",
+  "nodes": [
+    {
+      "id": "496bd7b2-aaa5-488c-b477-924ef6a5c4cf",
+      "name": "Sticky Note e936841f",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        0,
+        320
+      ],
+      "parameters": {
+        "content": "## D4b - LinkedIn jobs (Apify harvestapi/linkedin-job-search)\nSelf-draining: claims up to account_limit alive accounts (intel_accounts_for_jobs stamps jobs_attempted_at), 10 companies per Apify call, posted in the past month, raw rows → account_intel.jobs_raw → intel_apply_jobs maps to account_intel.jobs with the signal flags (contract, visa, on-site, IT, People, remote).\n\n$1 per 1,000 jobs. Re-runs weekly (6-day claim window).",
+        "color": 4,
+        "width": 560,
+        "height": 200
+      }
+    },
+    {
+      "id": "b5a5a22b-4e54-49f8-a653-0be2096b7804",
+      "name": "Daily 05:30",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.4,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "daysInterval": 1,
+              "field": "days",
+              "triggerAtHour": 5,
+              "triggerAtMinute": 30
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "ff5f839e-caf5-4cf5-90b0-ff7655906da5",
+      "name": "Config",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.5,
+      "position": [
+        224,
+        96
+      ],
+      "parameters": {
+        "mode": "manual",
+        "assignments": {
+          "assignments": [
+            {
+              "id": "c1",
+              "name": "account_limit",
+              "type": "number",
+              "value": 450
+            },
+            {
+              "id": "c2",
+              "name": "posted_limit",
+              "type": "string",
+              "value": "month"
+            },
+            {
+              "id": "c3",
+              "name": "max_items",
+              "type": "number",
+              "value": 100
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "fdd5c776-afab-4e35-a24d-8de221b7a441",
+      "name": "Run jobs (manual)",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        192
+      ],
+      "parameters": {}
+    },
+    {
+      "id": "262b481b-63ea-4a21-8615-9417fc33adb0",
+      "name": "Load accounts for jobs",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        448,
+        96
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "https://YOUR_SUPABASE_PROJECT_REF.supabase.co/rest/v1/rpc/intel_accounts_for_jobs",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "supabaseApi",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ p_limit: $json.account_limit }) }}",
+        "options": {}
+      },
+      "credentials": {
+        "supabaseApi": {
+          "id": "CRED_SUPABASE",
+          "name": "Supabase (service role)"
+        }
+      },
+      "executeOnce": true
+    },
+    {
+      "id": "66bc7bd7-dbb1-4f2b-bd65-aa0cac056bf7",
+      "name": "Batches of 10",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        672,
+        96
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// One company per call. Tested 12 Oct: a batch can return nothing for every company in it when one slug fails to resolve, and the actor charges per result, so singles cost nothing extra.\nconst c = $('Config').first().json;\nconst rows = $input.all().map(i => i.json).filter(r => r.linkedin_url && /linkedin\\.com\\/company\\/[^/]{3,}/.test(r.linkedin_url));\nreturn rows.map((r, i) => ({ json: { batch_id: new Date().toISOString().slice(0,16) + '-' + (i + 1), account_id: r.account_id, company: [r.linkedin_url.replace(/\\/(about|jobs|posts)\\/?$/, '')], postedLimit: c.posted_limit, maxItems: Number(c.max_items) || 100 } }));"
+      }
+    },
+    {
+      "id": "8794e447-eb50-4acb-94b6-e7c4c8b8294c",
+      "name": "Apify LinkedIn jobs",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        896,
+        96
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.apify.com/v2/acts/harvestapi~linkedin-job-search/run-sync-get-dataset-items",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ company: $json.company, postedLimit: $json.postedLimit, maxItems: $json.maxItems, sortBy: \"date\" }) }}",
+        "options": {
+          "timeout": 300000,
+          "batching": {
+            "batch": {
+              "batchSize": 4,
+              "batchInterval": 500
+            }
+          },
+          "response": {
+            "response": {
+              "responseFormat": "text",
+              "outputPropertyName": "body"
+            }
+          }
+        }
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "CRED_APIFY",
+          "name": "Apify (header auth)"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "7311ba90-7949-458c-8342-45eb43ba3a11",
+      "name": "Parse response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1120,
+        96
+      ],
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const b = $('Batches of 10').item.json;\nlet rows = []; let err = null;\nif ($json.error) { err = typeof $json.error === 'string' ? $json.error : JSON.stringify($json.error).slice(0, 500); }\nelse {\n  try { const p = JSON.parse(String($json.body || '[]')); rows = Array.isArray(p) ? p : (p.items || []); if (!Array.isArray(p) && !p.items) err = String($json.body).slice(0, 500); } catch (e) { err = 'unparseable: ' + String($json.body).slice(0, 300); }\n}\nconst slim = rows.map(r => { const o = { ...r }; delete o.descriptionHtml; if (o.descriptionText) o.descriptionText = String(o.descriptionText).slice(0, 4000); if (b.account_id) o.account_id = b.account_id; return o; });\nreturn { json: { batch_id: b.batch_id, items: slim, count: slim.length, sent: (b.company || []).length, error: err, companies: b.company } };"
+      }
+    },
+    {
+      "id": "28f5a9d1-802f-48d5-9c43-fc2fd644aa7e",
+      "name": "Save jobs raw (Supabase RPC)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        1344,
+        96
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "https://YOUR_SUPABASE_PROJECT_REF.supabase.co/rest/v1/rpc/intel_save_jobs_raw",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "supabaseApi",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ p_source: \"linkedin\", p_batch_id: $json.batch_id, p_items: $json.items }) }}",
+        "options": {
+          "timeout": 120000,
+          "batching": {
+            "batch": {
+              "batchSize": 1,
+              "batchInterval": 300
+            }
+          }
+        }
+      },
+      "credentials": {
+        "supabaseApi": {
+          "id": "CRED_SUPABASE",
+          "name": "Supabase (service role)"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "5e31d33d-f0ee-4dc0-8270-5f4b584d3344",
+      "name": "Apply jobs (Supabase RPC)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        1568,
+        96
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "https://YOUR_SUPABASE_PROJECT_REF.supabase.co/rest/v1/rpc/intel_apply_jobs",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "supabaseApi",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({}) }}",
+        "options": {
+          "timeout": 240000
+        }
+      },
+      "credentials": {
+        "supabaseApi": {
+          "id": "CRED_SUPABASE",
+          "name": "Supabase (service role)"
+        }
+      },
+      "executeOnce": true,
+      "onError": "continueRegularOutput"
+    }
+  ],
+  "connections": {
+    "Config": {
+      "main": [
+        [
+          {
+            "node": "Load accounts for jobs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Run jobs (manual)": {
+      "main": [
+        [
+          {
+            "node": "Config",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Load accounts for jobs": {
+      "main": [
+        [
+          {
+            "node": "Batches of 10",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Batches of 10": {
+      "main": [
+        [
+          {
+            "node": "Apify LinkedIn jobs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Apify LinkedIn jobs": {
+      "main": [
+        [
+          {
+            "node": "Parse response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse response": {
+      "main": [
+        [
+          {
+            "node": "Save jobs raw (Supabase RPC)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save jobs raw (Supabase RPC)": {
+      "main": [
+        [
+          {
+            "node": "Apply jobs (Supabase RPC)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Daily 05:30": {
+      "main": [
+        [
+          {
+            "node": "Config",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "nodeGroups": [],
+  "settings": {
+    "executionOrder": "v1",
+    "availableInMCP": true,
+    "errorWorkflow": "WF_ERROR_ALERT",
+    "timezone": "Europe/London",
+    "saveDataSuccessExecution": "none",
+    "executionTimeout": 1100
+  },
+  "tags": []
+}

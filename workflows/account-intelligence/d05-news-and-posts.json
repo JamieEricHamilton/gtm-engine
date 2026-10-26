@@ -1,0 +1,478 @@
+{
+  "id": "WF_D05_NEWS_AND_POSTS",
+  "name": "AI D5 - News and posts",
+  "description": "Google News RSS + LinkedIn posts per account, classified into fixed signal kinds by Sonnet 5, saved to account_intel.news_signals.",
+  "nodes": [
+    {
+      "id": "787f5825-e273-4b90-b0b2-5cb261c71bc9",
+      "name": "Sticky Note 60159a88",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        0,
+        420
+      ],
+      "parameters": {
+        "content": "## D5 - News and posts\nSelf-draining: claims accounts (news_attempted_at), Google News RSS per brand name (270 days, GB), keeps items that name the company, adds LinkedIn posts from D2, and only calls the model when there is something to classify. Sonnet 5, temperature 0, fixed kinds, date required, account_id echoed. Saved via intel_save_news.",
+        "color": 4,
+        "width": 560,
+        "height": 170
+      }
+    },
+    {
+      "id": "77ffdb9f-85e0-42b9-9ffc-4f3a797b48e3",
+      "name": "Every 10 min",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.4,
+      "position": [
+        0,
+        320
+      ],
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 10
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "9c0cc0ab-d592-44ac-bfeb-d8679d985770",
+      "name": "Config",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.5,
+      "position": [
+        224,
+        416
+      ],
+      "parameters": {
+        "mode": "manual",
+        "assignments": {
+          "assignments": [
+            {
+              "id": "c1",
+              "name": "account_limit",
+              "type": "number",
+              "value": 150
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "640f904f-721d-4c44-8542-ea48eb2128cc",
+      "name": "Run news (manual)",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        512
+      ],
+      "parameters": {}
+    },
+    {
+      "id": "b4a240cd-ed5a-4036-a434-8948b2db3f84",
+      "name": "Load accounts for news",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        448,
+        416
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "https://YOUR_SUPABASE_PROJECT_REF.supabase.co/rest/v1/rpc/intel_accounts_for_news",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "supabaseApi",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ p_limit: $json.account_limit }) }}",
+        "options": {}
+      },
+      "credentials": {
+        "supabaseApi": {
+          "id": "CRED_SUPABASE",
+          "name": "Supabase (service role)"
+        }
+      },
+      "executeOnce": true,
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000
+    },
+    {
+      "id": "6f796dab-26a0-4479-9204-7d4c117b370e",
+      "name": "Google News RSS",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        672,
+        416
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "=https://news.google.com/rss/search?q={{ encodeURIComponent('\"' + $json.name.replace(/\\s+(ltd|limited|llp|plc)\\.?$/i, '') + '\" when:270d') }}&hl=en-GB&gl=GB&ceid=GB:en",
+        "options": {
+          "timeout": 20000,
+          "batching": {
+            "batch": {
+              "batchSize": 3,
+              "batchInterval": 1500
+            }
+          },
+          "response": {
+            "response": {
+              "responseFormat": "text",
+              "outputPropertyName": "body",
+              "neverError": true
+            }
+          }
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "cd4521b0-2113-4ca8-ad23-6da9b10baf32",
+      "name": "Candidates",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        896,
+        416
+      ],
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// Parse RSS items, keep only those naming the company (exact name or domain stem), add LinkedIn posts. No LLM if nothing to classify.\nconst a = $('Load accounts for news').item.json;\nconst xml = String($json.body || '');\nconst norm = s => String(s || '').toLowerCase().replace(/\\b(ltd|limited|llp|plc|uk|group|holdings)\\b/g, '').replace(/[^a-z0-9]/g, '');\nconst brand = String(a.name || '').split(/\\s+[-|:]\\s+/)[0].replace(/\\s+(ltd|limited|llp|plc)\\.?$/i, '').trim();\nconst stem = a.domain ? String(a.domain).split('.')[0] : '';\nconst un = s => String(s || '').replace(/<!\\[CDATA\\[|\\]\\]>/g, '').replace(/&amp;/g, '&').replace(/&#39;/g, \"'\").replace(/&quot;/g, '\"').replace(/<[^>]+>/g, ' ').replace(/\\s+/g, ' ').trim();\nconst items = [];\nconst re = /<item>([\\s\\S]*?)<\\/item>/g; let m;\nwhile ((m = re.exec(xml)) && items.length < 12) {\n  const b = m[1];\n  const title = un((b.match(/<title>([\\s\\S]*?)<\\/title>/) || [,''])[1]);\n  const link = un((b.match(/<link>([\\s\\S]*?)<\\/link>/) || [,''])[1]);\n  const date = un((b.match(/<pubDate>([\\s\\S]*?)<\\/pubDate>/) || [,''])[1]);\n  const desc = un((b.match(/<description>([\\s\\S]*?)<\\/description>/) || [,''])[1]).slice(0, 300);\n  const hay = (title + ' ' + desc).toLowerCase();\n  const named = (brand.length >= 4 && hay.includes(brand.toLowerCase())) || (stem.length >= 5 && norm(hay).includes(norm(stem)));\n  if (named) items.push({ source: 'news', title, url: link, date: date ? new Date(date).toISOString().slice(0, 10) : null, text: desc });\n}\nfor (const p of (a.posts || [])) {\n  if (!p || !p.text) continue;\n  items.push({ source: 'post', title: '', url: p.url || ('linkedin-post:' + (p.date || '') + ':' + String(p.text).slice(0, 40)), date: p.date ? String(p.date).slice(0, 10) : null, text: String(p.text).slice(0, 500) });\n}\nreturn { json: { account_id: a.account_id, name: a.name, industry: a.li_industry, hq: a.hq_country, items, n: items.length } };"
+      }
+    },
+    {
+      "id": "25a81a55-21d1-497c-bcc4-b9e15c417b6c",
+      "name": "Anything to classify?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        1120,
+        416
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "n1",
+              "leftValue": "={{ $json.n }}",
+              "rightValue": 0,
+              "operator": {
+                "type": "number",
+                "operation": "gt"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "c7c5a6ad-30c7-41dd-ba29-68ab666168a9",
+      "name": "Classify signals",
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.9,
+      "position": [
+        1344,
+        0
+      ],
+      "parameters": {
+        "promptType": "define",
+        "hasOutputParser": true,
+        "batching": {},
+        "text": "=You classify news items and LinkedIn posts about one UK/Irish SMB into buying signals for an employment platform. Return ONLY the JSON requested.\n\nCompany: {{ $json.name }} (industry: {{ $json.industry || \"unknown\" }}, HQ: {{ $json.hq || \"unknown\" }}, website: {{ $('Load accounts for news').item.json.domain || \"unknown\" }})\naccount_id: {{ $json.account_id }} (return this exact value, unchanged)\n\nITEMS\n{{ $json.items.map((x, i) => \"[\" + i + \"] source=\" + x.source + \" date=\" + (x.date || \"unknown\") + \" url=\" + x.url + \"\\n\" + (x.title ? x.title + \" - \" : \"\") + x.text).join(\"\\n\\n\") }}\n\nRULES\n- First decide whether each item is about THIS company. Many SMBs share a name with unrelated organisations abroad or in other industries. If the item's country, industry or scale does not fit the company above, it is a different organisation: kind none.\n- kind is one of: funding, expansion, new_office, project_win, people_hire, layoffs, acquisition, none. Use none for anything not clearly about THIS company or not one of those events (awards, product launches, opinion pieces, generic hiring posts with no new country or office).\n- funding = the company itself raising equity or venture investment (seed, pre-seed, Series A/B, growth investment, private equity, angel round, strategic investment from a corporate venture arm). It is NOT funding when the money is a grant, a government or Innovate UK award, a charity appeal or fundraising campaign, a loan, a fund the company manages or distributes to others, or an investment the company made in someone else. Those are kind none.\n- expansion = entering a new country or market, or hiring a team in another country. new_office = a named new office or site. people_hire = a new Head of People / HR / Talent / CPO or similar senior people role. project_win = a contract award or project win (construction, energy, engineering, telecoms). layoffs = redundancies or closures. acquisition = acquired or acquiring.\n- event_date is YYYY-MM-DD from the item date; if the item has no date, omit the item entirely.\n- url and source are copied exactly from the item. snippet is at most 30 words of the evidence, no interpretation. amount is the raise amount as written (e.g. £4m, $20 million) or empty.\n- Only include items with kind other than none. signals may be an empty array."
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "id": "93661ed3-e752-4c21-a3de-339b5330e2a1",
+      "name": "Sonnet 5",
+      "type": "@n8n/n8n-nodes-langchain.lmChatAnthropic",
+      "typeVersion": 1.6,
+      "position": [
+        1360,
+        224
+      ],
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "value": "claude-sonnet-5",
+          "mode": "list",
+          "cachedResultName": "Claude Sonnet 5"
+        },
+        "options": {
+          "temperature": 0
+        }
+      },
+      "credentials": {
+        "anthropicApi": {
+          "id": "CRED_ANTHROPIC",
+          "name": "Anthropic API"
+        }
+      }
+    },
+    {
+      "id": "38d5d032-107a-45f1-aba3-b65b522100ff",
+      "name": "News schema",
+      "type": "@n8n/n8n-nodes-langchain.outputParserStructured",
+      "typeVersion": 1.3,
+      "position": [
+        1488,
+        224
+      ],
+      "parameters": {
+        "jsonSchemaExample": "{\"account_id\":\"00000000-0000-0000-0000-000000000000\",\"signals\":[{\"kind\":\"funding\",\"event_date\":\"2026-06-12\",\"url\":\"https://example.com/article\",\"title\":\"Acme raises £4m\",\"snippet\":\"Acme Ltd has closed a £4m Series A\",\"amount\":\"£4m\",\"source\":\"news\"}]}",
+        "autoFix": true
+      }
+    },
+    {
+      "id": "c2825ff1-6b6f-46a2-aeda-80fe6e4ad2cf",
+      "name": "Sonnet 5 (autofix)",
+      "type": "@n8n/n8n-nodes-langchain.lmChatAnthropic",
+      "typeVersion": 1.6,
+      "position": [
+        1488,
+        432
+      ],
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "value": "claude-sonnet-5",
+          "mode": "list",
+          "cachedResultName": "Claude Sonnet 5"
+        },
+        "options": {
+          "temperature": 0
+        }
+      },
+      "credentials": {
+        "anthropicApi": {
+          "id": "CRED_ANTHROPIC",
+          "name": "Anthropic API"
+        }
+      }
+    },
+    {
+      "id": "f63702cd-c3df-40bb-be7e-0d2047179d22",
+      "name": "Save news (Supabase RPC)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        1696,
+        208
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "https://YOUR_SUPABASE_PROJECT_REF.supabase.co/rest/v1/rpc/intel_save_news",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "supabaseApi",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ p_account_id: $json.output.account_id, p_items: Array.isArray($json.output.signals) ? $json.output.signals : [] }) }}",
+        "options": {
+          "batching": {
+            "batch": {
+              "batchSize": 5,
+              "batchInterval": 250
+            }
+          }
+        }
+      },
+      "credentials": {
+        "supabaseApi": {
+          "id": "CRED_SUPABASE",
+          "name": "Supabase (service role)"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "8c36ca68-40e7-42ad-aa3f-cf01f0f4bdac",
+      "name": "Mark checked (Supabase RPC)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        1408,
+        608
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "https://YOUR_SUPABASE_PROJECT_REF.supabase.co/rest/v1/rpc/intel_save_news",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "supabaseApi",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ p_account_id: $json.account_id, p_items: [] }) }}",
+        "options": {
+          "batching": {
+            "batch": {
+              "batchSize": 10,
+              "batchInterval": 250
+            }
+          }
+        }
+      },
+      "credentials": {
+        "supabaseApi": {
+          "id": "CRED_SUPABASE",
+          "name": "Supabase (service role)"
+        }
+      },
+      "onError": "continueRegularOutput"
+    }
+  ],
+  "connections": {
+    "Every 10 min": {
+      "main": [
+        [
+          {
+            "node": "Config",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Config": {
+      "main": [
+        [
+          {
+            "node": "Load accounts for news",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Run news (manual)": {
+      "main": [
+        [
+          {
+            "node": "Config",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Load accounts for news": {
+      "main": [
+        [
+          {
+            "node": "Google News RSS",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Google News RSS": {
+      "main": [
+        [
+          {
+            "node": "Candidates",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Candidates": {
+      "main": [
+        [
+          {
+            "node": "Anything to classify?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Anything to classify?": {
+      "main": [
+        [
+          {
+            "node": "Classify signals",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Mark checked (Supabase RPC)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Classify signals": {
+      "main": [
+        [
+          {
+            "node": "Save news (Supabase RPC)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Sonnet 5": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Classify signals",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "News schema": {
+      "ai_outputParser": [
+        [
+          {
+            "node": "Classify signals",
+            "type": "ai_outputParser",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Sonnet 5 (autofix)": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "News schema",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "nodeGroups": [],
+  "settings": {
+    "executionOrder": "v1",
+    "availableInMCP": true,
+    "errorWorkflow": "WF_ERROR_ALERT",
+    "timezone": "Europe/London",
+    "saveDataSuccessExecution": "none"
+  },
+  "tags": []
+}

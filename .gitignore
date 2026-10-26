@@ -1,0 +1,8 @@
+.env
+.secrets
+*.tgz
+raw/
+site/dist/
+__pycache__/
+.DS_Store
+tools/scrub_rules.local.json

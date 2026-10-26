@@ -1,0 +1,480 @@
+{
+  "id": "WF_DECISION_GATEWAY",
+  "name": "M3b - Decision gateway",
+  "description": "Reply / Hold buttons from every channel land here. State in ops.approvals; one branded page for every outcome.",
+  "nodes": [
+    {
+      "id": "33595d81-e840-4ed4-8028-03480062428d",
+      "name": "Sticky Note de679f32",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        100,
+        300
+      ],
+      "parameters": {
+        "content": "## Decision gateway\nEvery Reply / Hold button in every channel (email card, digest, Teams, WhatsApp) lands here with ?t=token&d=approve|hold. State lives in ops.approvals (Supabase), not in a paused execution: one atomic transition per click, the outcome decides what the page says, a change of mind from hold to reply just works, and a dead link is a branded page rather than an n8n error.",
+        "color": 4,
+        "width": 560,
+        "height": 180
+      }
+    },
+    {
+      "id": "9944842a-bb6c-4318-8497-8eb32365cbfe",
+      "name": "Decision link clicked",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {
+        "path": "decide",
+        "httpMethod": "GET",
+        "responseMode": "responseNode",
+        "options": {
+          "ignoreBots": true
+        }
+      },
+      "webhookId": "00000000-0000-4000-8000-000000000002"
+    },
+    {
+      "id": "7d2bbcb7-73b3-4c1e-b5cd-d91a4828e62a",
+      "name": "Decide",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        224,
+        0
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "https://YOUR_SUPABASE_PROJECT_REF.supabase.co/rest/v1/rpc/ops_decide",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "supabaseApi",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ p_token: String($json.query?.t || \"\"), p_decision: String($json.query?.d || \"\") }) }}",
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "credentials": {
+        "supabaseApi": {
+          "id": "CRED_SUPABASE",
+          "name": "Supabase (service role)"
+        }
+      }
+    },
+    {
+      "id": "a0af998f-e910-4a17-9432-45f1af3d5c09",
+      "name": "Send the reply?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        896,
+        0
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "c1",
+              "leftValue": "={{ [\"sent\", \"changed_to_sent\"].includes($json.outcome) }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      }
+    },
+    {
+      "id": "281b2c64-8430-441c-ad3a-f71e27e43eee",
+      "name": "Build acknowledgement",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1120,
+        -120
+      ],
+      "parameters": {
+        "jsCode": "// Candidate-facing acknowledgement, branded from the approval row's cfg. Same design system as the card and digest.\n// Runs after the page has been served, so the row comes from Decide, not from the input item.\nconst row = $('Decide').first().json;\nconst c = row.candidate || {};\nconst job = row.job || {};\nconst cfg = row.cfg || {};\nconst agency = cfg.agency_name || 'the team';\nconst primary = cfg.brand_primary || '#0ea672';\nconst ink = cfg.brand_ink || '#111827';\nconst consultant = cfg.consultant_name || '';\nconst website = cfg.agency_website || '';\nconst esc = s => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');\nconst first = String(c.full_name || '').trim().split(/\\s+/)[0] || 'there';\nconst band = String(c.band || '').toUpperCase();\nconst strong = band === 'A' || band === 'B';\nconst title = job.title || 'the role';\nconst email = String(c.email || '').trim();\nconst fallback = cfg.fallback_email || cfg.consultant_email || 'owner@example.com';\nconst to = (email.includes('@') && !email.toLowerCase().endsWith('example.com')) ? email : fallback;\nconst paras = strong\n  ? [`Thanks for applying for the ${title} role. We've read your CV and we'd like to talk.`, `${consultant ? consultant : 'One of our consultants'} will be in touch within 24 hours to arrange a call. If you'd rather pick a time now, reply to this email with what suits you.`]\n  : [`Thanks for applying for the ${title} role. Your CV is with the consultant handling it.`, `We're reviewing applications over the next few days and will come back to you either way. If anything changes in the meantime, reply to this email and it will reach the right person.`];\nconst font = \"-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif\";\nconst html = `<!doctype html><html><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><title>${esc(agency)}</title></head>\n<body style=\"margin:0;padding:0;background:#f3f4f6;\">\n<table role=\"presentation\" width=\"100%\" cellpadding=\"0\" cellspacing=\"0\" style=\"background:#f3f4f6;\">\n<tr><td align=\"center\" style=\"padding:24px 12px 32px;\">\n<table role=\"presentation\" width=\"100%\" cellpadding=\"0\" cellspacing=\"0\" style=\"max-width:560px;background:#ffffff;border:1px solid #e5e7eb;border-radius:12px;overflow:hidden;\">\n  <tr><td style=\"height:4px;background:${primary};font-size:0;line-height:0;\">&nbsp;</td></tr>\n  <tr><td style=\"padding:24px 28px 0;font:700 15px/1 ${font};color:${ink};\">${esc(agency)}</td></tr>\n  <tr><td style=\"padding:24px 28px 0;font:16px/1.6 ${font};color:${ink};\">Hi ${esc(first)},</td></tr>\n  ${paras.map(p => `<tr><td style=\"padding:14px 28px 0;font:16px/1.6 ${font};color:${ink};\">${esc(p)}</td></tr>`).join('')}\n  <tr><td style=\"padding:22px 28px 0;font:16px/1.6 ${font};color:${ink};\">Kind regards</td></tr>\n  <tr><td style=\"padding:2px 28px 26px;font:600 16px/1.6 ${font};color:${ink};\">${esc(consultant || agency)}${consultant ? `<div style=\"font:400 14px/1.5 ${font};color:#6b7280;\">${esc(agency)}</div>` : ''}</td></tr>\n  <tr><td style=\"padding:14px 28px;border-top:1px solid #e5e7eb;font:12px/1.6 ${font};color:#9ca3af;\">${esc(agency)}${website ? ` &middot; <a href=\"${esc(website)}\" style=\"color:#9ca3af;\">${esc(website.replace(/^https?:\\/\\//, ''))}</a>` : ''}<br>You're receiving this because you applied for a role with us. Reply to this email to reach the consultant handling your application.</td></tr>\n</table>\n</td></tr></table></body></html>`;\nreturn [{ json: { to, subject: `Your application for ${title} - ${agency}`, html, agency, reply_to: cfg.consultant_email || fallback } }];"
+      }
+    },
+    {
+      "id": "3772f9cf-f84e-4127-864b-e933e8fd4c7e",
+      "name": "Send acknowledgement",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.2,
+      "position": [
+        1344,
+        -120
+      ],
+      "parameters": {
+        "sendTo": "={{ $json.to }}",
+        "subject": "={{ $json.subject }}",
+        "message": "={{ $json.html }}",
+        "options": {
+          "appendAttribution": false,
+          "senderName": "={{ $json.agency }}",
+          "replyTo": "={{ $json.reply_to }}"
+        }
+      },
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "CRED_GMAIL",
+          "name": "Gmail OAuth2"
+        }
+      },
+      "onError": "continueRegularOutput",
+      "webhookId": "00000000-0000-4000-8000-000000000003"
+    },
+    {
+      "id": "fcc4c046-4e13-4966-a671-3f48de80a00e",
+      "name": "Log sent",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        1568,
+        -120
+      ],
+      "parameters": {
+        "operation": "update",
+        "documentId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "={{ $('Decide').first().json.cfg?.log_sheet_id || 'SHEET_ID_SCREENING_LOG' }}"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "Sheet1"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "received_at": "={{ $('Decide').first().json.received_at }}",
+            "ack_status": "sent",
+            "ack_sent_at": "={{ $now.toISO() }}"
+          },
+          "matchingColumns": [
+            "received_at"
+          ],
+          "schema": [
+            {
+              "id": "received_at",
+              "displayName": "received_at",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "ack_status",
+              "displayName": "ack_status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "ack_sent_at",
+              "displayName": "ack_sent_at",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            }
+          ]
+        },
+        "options": {}
+      },
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "CRED_GSHEETS",
+          "name": "Google Sheets OAuth2"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "dc49bfaf-94dc-4407-9796-dfdfb5be3410",
+      "name": "Render page",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        448,
+        0
+      ],
+      "parameters": {
+        "jsCode": "// One branded page for every outcome. Reads the Decide row directly because three paths converge here.\nconst r = $('Decide').first().json || {};\nconst o = r.outcome || 'invalid';\nconst c = r.candidate || {};\nconst cfg = r.cfg || {};\nconst first = String(c.full_name || '').trim().split(/\\s+/)[0] || 'The candidate';\nconst agency = cfg.agency_name || 'OpsAutomated';\nconst ats = cfg.ats_label || 'the ATS';\nconst primary = cfg.brand_primary || '#0ea672';\nconst band = String(c.band || '').toUpperCase();\nconst esc = s => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');\nconst when = iso => { const t = new Date(iso); return isNaN(t) ? '' : t.toLocaleString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', timeZone: 'Europe/London' }); };\nconst ok = { bg: '#d1fae5', fg: '#065f46', glyph: '&#10003;' }, hold = { bg: '#e5e7eb', fg: '#374151', glyph: '&#8230;' }, warn = { bg: '#fff7ed', fg: '#9a3412', glyph: '!' };\nlet tone = ok, title = '', body = '', hint = 'You can close this tab.';\nswitch (o) {\n  case 'sent':\n    title = `${first} has been acknowledged`;\n    body = `The Band ${band} reply is on its way from ${agency}, with your address as reply-to. ${ats} and the screening log are up to date.`;\n    break;\n  case 'changed_to_sent':\n    title = `${first} has been acknowledged`;\n    body = `You'd put ${first} on hold earlier. The Band ${band} reply has gone now, from ${agency}, with your address as reply-to.`;\n    break;\n  case 'held':\n    tone = hold; title = `${first} is on hold`;\n    body = `Nothing has been sent. ${first} stays filed in ${ats} and will show as on hold in tomorrow's digest.`;\n    hint = `Changed your mind? Reply on the card still works.`;\n    break;\n  case 'already_held':\n    tone = hold; title = `${first} is already on hold`;\n    body = `Nothing has changed. ${first} is filed in ${ats} and will show as on hold in tomorrow's digest.`;\n    hint = `Reply on the card still works if you'd like to send the acknowledgement.`;\n    break;\n  case 'already_sent':\n    title = `${first} was acknowledged${r.sent_at ? ' on ' + when(r.sent_at) : ''}`;\n    body = `The reply has already gone, so there's nothing more to send. ${first} is filed in ${ats}.`;\n    break;\n  default:\n    tone = warn; title = `This link isn't valid`;\n    body = `It may be from an old card. Open the latest card in your inbox, or find the candidate in ${ats}.`;\n}\nconst footer = cfg.agency_name ? `Run for ${esc(agency)} by OpsAutomated.` : 'OpsAutomated';\nconst font = \"-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif\";\nconst html = `<!doctype html><html><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><title>${esc(agency)}</title></head><body style=\"margin:0;background:#f3f4f6;font-family:${font};\"><div style=\"height:4px;background:${primary};\"></div><div style=\"max-width:520px;margin:48px auto;padding:0 20px;\"><div style=\"font:700 15px/1 ${font};color:#111827;\">${esc(agency)}</div><div style=\"margin-top:28px;background:#fff;border:1px solid #e5e7eb;border-radius:12px;padding:28px 24px;\"><div style=\"width:44px;height:44px;border-radius:999px;background:${tone.bg};color:${tone.fg};font:700 22px/44px ${font};text-align:center;\">${tone.glyph}</div><h1 style=\"margin:18px 0 0;font:700 22px/1.25 ${font};color:#111827;letter-spacing:-.01em;\">${esc(title)}</h1><p style=\"margin:12px 0 0;font:15px/1.55 ${font};color:#374151;\">${esc(body)}</p><p style=\"margin:20px 0 0;font:13px/1.5 ${font};color:#9ca3af;\">${esc(hint)}</p></div><div style=\"margin-top:16px;font:12px/1.6 ${font};color:#9ca3af;\">${footer}</div></div></body></html>`;\nreturn [{ json: { html, outcome: o } }];"
+      }
+    },
+    {
+      "id": "318ee89e-aad5-47b9-97e3-95ce07dc13e3",
+      "name": "Newly held?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1120,
+        120
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "c2",
+              "leftValue": "={{ $json.outcome }}",
+              "rightValue": "held",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      }
+    },
+    {
+      "id": "6e20bed6-9a00-4155-8eda-5f27f448a345",
+      "name": "Log held",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        1344,
+        120
+      ],
+      "parameters": {
+        "operation": "update",
+        "documentId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "={{ $('Decide').first().json.cfg?.log_sheet_id || 'SHEET_ID_SCREENING_LOG' }}"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "Sheet1"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "received_at": "={{ $('Decide').first().json.received_at }}",
+            "ack_status": "held",
+            "ack_sent_at": ""
+          },
+          "matchingColumns": [
+            "received_at"
+          ],
+          "schema": [
+            {
+              "id": "received_at",
+              "displayName": "received_at",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "ack_status",
+              "displayName": "ack_status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "ack_sent_at",
+              "displayName": "ack_sent_at",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            }
+          ]
+        },
+        "options": {}
+      },
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "CRED_GSHEETS",
+          "name": "Google Sheets OAuth2"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "6b42348e-be34-4907-b98e-896816d6aa2e",
+      "name": "Show page",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        672,
+        0
+      ],
+      "parameters": {
+        "respondWith": "text",
+        "responseBody": "={{ $json.html }}",
+        "options": {
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Content-Type",
+                "value": "text/html; charset=utf-8"
+              }
+            ]
+          }
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Decision link clicked": {
+      "main": [
+        [
+          {
+            "node": "Decide",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send the reply?": {
+      "main": [
+        [
+          {
+            "node": "Build acknowledgement",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Newly held?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build acknowledgement": {
+      "main": [
+        [
+          {
+            "node": "Send acknowledgement",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send acknowledgement": {
+      "main": [
+        [
+          {
+            "node": "Log sent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Render page": {
+      "main": [
+        [
+          {
+            "node": "Show page",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Newly held?": {
+      "main": [
+        [
+          {
+            "node": "Log held",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    },
+    "Decide": {
+      "main": [
+        [
+          {
+            "node": "Render page",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Show page": {
+      "main": [
+        [
+          {
+            "node": "Send the reply?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "nodeGroups": [
+    {
+      "id": "c46748d0-d659-4fad-8f53-89587011f49c",
+      "name": "After the page",
+      "nodeIds": [
+        "a0af998f-e910-4a17-9432-45f1af3d5c09",
+        "281b2c64-8430-441c-ad3a-f71e27e43eee",
+        "3772f9cf-f84e-4127-864b-e933e8fd4c7e",
+        "fcc4c046-4e13-4966-a671-3f48de80a00e",
+        "318ee89e-aad5-47b9-97e3-95ce07dc13e3",
+        "6e20bed6-9a00-4155-8eda-5f27f448a345"
+      ],
+      "description": "Runs after the browser has its page: reply path sends the acknowledgement and logs sent; a fresh hold logs held"
+    }
+  ],
+  "settings": {
+    "executionOrder": "v1",
+    "availableInMCP": true,
+    "errorWorkflow": "WF_ERROR_ALERT"
+  },
+  "tags": []
+}

@@ -1,0 +1,883 @@
+{
+  "id": "WF_INBOUND_APPLICATIONS",
+  "name": "M3 - Inbound applications",
+  "description": null,
+  "nodes": [
+    {
+      "parameters": {
+        "pollTimes": {
+          "item": [
+            {
+              "mode": "everyX",
+              "value": 1,
+              "unit": "minutes"
+            }
+          ]
+        },
+        "simple": false,
+        "filters": {
+          "q": "subject:KT- has:attachment",
+          "readStatus": "unread"
+        },
+        "options": {
+          "downloadAttachments": true
+        }
+      },
+      "type": "n8n-nodes-base.gmailTrigger",
+      "typeVersion": 1.4,
+      "position": [
+        0,
+        0
+      ],
+      "id": "dd1d2ce0-48df-4757-a6db-28e8105259a6",
+      "name": "Gmail Trigger",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "CRED_GMAIL",
+          "name": "Gmail OAuth2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "pdf",
+        "binaryPropertyName": "attachment_0",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.extractFromFile",
+      "typeVersion": 1.1,
+      "position": [
+        224,
+        0
+      ],
+      "id": "c07362af-f98e-4e05-9a37-a8b303ef1722",
+      "name": "Extract from File"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "2e0496d0-28d0-41e1-b087-b0ba42243e93",
+              "name": "job_ref",
+              "value": "=     {{ ($('Gmail Trigger').item.json.subject || $('Gmail Trigger').item.json.headers.subject).match(/KT-\\d{3}/)[0] }}",
+              "type": "string"
+            }
+          ]
+        },
+        "includeOtherFields": true,
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.5,
+      "position": [
+        448,
+        0
+      ],
+      "id": "5bbc561d-e288-443b-a5ad-fa5d1ace7302",
+      "name": "Parse email"
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "value": "SHEET_ID_DEMO_JOBS",
+          "mode": "list",
+          "cachedResultName": "Kestrel jobs",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/SHEET_ID_DEMO_JOBS/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 1096514714,
+          "mode": "list",
+          "cachedResultName": "kestrel-jobs",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/SHEET_ID_DEMO_JOBS/edit#gid=1096514714"
+        },
+        "filtersUI": {
+          "values": [
+            {
+              "lookupColumn": "job_ref",
+              "lookupValue": "={{ String($json.job_ref).trim() }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        672,
+        0
+      ],
+      "id": "bfd56462-22df-4e7a-9dee-334352118618",
+      "name": "Get job spec",
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "CRED_GSHEETS",
+          "name": "Google Sheets OAuth2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=You are a recruitment screening assistant. You will be given a job specification and the raw text of a candidate's CV.\n\nExtract the candidate's details and score their fit for the role. Return ONLY the JSON object requested, no commentary.\n\nRules:\n- Every field must be a string, number or list as shown in the schema. Never use null. For anything not stated in the CV, use the exact string \"not stated\". Do not guess.\n- years_experience is total years of work experience as a whole number. If unknown, use 0.\n- fit_score is 1 to 10 against the job spec. 8-10 = strong match, 5-7 = partial, 1-4 = poor.\n- band: A if score 8-10, B if 5-7, C if 1-4.\n- rationale: two short sentences, 40 words maximum in total, specific to this CV and this spec. First sentence: the strongest reason for the score. Second: the main gap or risk, or \"No gaps against the spec.\" No adjectives like impressive or excellent.\n- flags: list any of \"no_right_to_work_stated\", \"salary_mismatch\", \"location_mismatch\", \"career_gap\", \"missing_contact_details\" that apply. Empty list if none.\n\nJOB SPEC ({{ $json.job_ref }} - {{ $json.title }}):\n{{ $json.spec }}\n\nCV TEXT:\n{{ $('Parse email').item.json.text }}",
+        "hasOutputParser": true,
+        "batching": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.9,
+      "position": [
+        896,
+        0
+      ],
+      "id": "f85adff0-5be8-406d-86eb-f18e2c34f5e7",
+      "name": "Basic LLM Chain"
+    },
+    {
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "value": "claude-sonnet-5-5",
+          "mode": "list",
+          "cachedResultName": "Claude Sonnet 5.5"
+        },
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatAnthropic",
+      "typeVersion": 1.6,
+      "position": [
+        784,
+        208
+      ],
+      "id": "96c5beb2-feb4-408b-94db-f9789ef23438",
+      "name": "Anthropic Chat Model",
+      "credentials": {
+        "anthropicApi": {
+          "id": "CRED_ANTHROPIC",
+          "name": "Anthropic API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsonSchemaExample": "{\n  \"full_name\": \"Jane Smith\",\n  \"email\": \"jane@example.com\",\n  \"phone\": \"07700 900000\",\n  \"location\": \"Chelmsford, Essex\",\n  \"current_title\": \"Senior Software Engineer\",\n  \"current_employer\": \"Acme Ltd\",\n  \"years_experience\": 7,\n  \"key_skills\": [\"Python\", \"AWS\", \"PostgreSQL\"],\n  \"salary_expectation\": \"£70,000\",\n  \"right_to_work\": \"UK citizen\",\n  \"fit_score\": 8,\n  \"band\": \"A\",\n  \"rationale\": \"Strong match on core stack and seniority. Location is commutable and salary is within band.\",\n  \"flags\": []\n}",
+        "autoFix": true
+      },
+      "type": "@n8n/n8n-nodes-langchain.outputParserStructured",
+      "typeVersion": 1.3,
+      "position": [
+        1040,
+        208
+      ],
+      "id": "cd9deaeb-a639-4ace-bf6e-ef816a550b2d",
+      "name": "Structured Output Parser"
+    },
+    {
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "value": "claude-sonnet-5-5",
+          "mode": "list",
+          "cachedResultName": "Claude Sonnet 5.5"
+        },
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatAnthropic",
+      "typeVersion": 1.6,
+      "position": [
+        976,
+        416
+      ],
+      "id": "553be2a8-2146-4242-b016-bf87004ee581",
+      "name": "Anthropic Chat Model1",
+      "credentials": {
+        "anthropicApi": {
+          "id": "CRED_ANTHROPIC",
+          "name": "Anthropic API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "raw",
+        "jsonOutput": "={{ { received_at: $now.toISO(), job_ref: $('Parse email').item.json.job_ref, ...$json.output, key_skills: $json.output.key_skills.join(', '), flags: $json.output.flags.join(', ') } }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.5,
+      "position": [
+        1264,
+        0
+      ],
+      "id": "97d0b8eb-771e-4062-b5d6-d0eb3a3e0376",
+      "name": "Flatten"
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "SHEET_ID_SCREENING_LOG",
+          "mode": "list",
+          "cachedResultName": "Kestrel screening log",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/SHEET_ID_SCREENING_LOG/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "gid=0",
+          "mode": "list",
+          "cachedResultName": "Sheet1",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/SHEET_ID_SCREENING_LOG/edit#gid=0"
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "value": {},
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "received_at",
+              "displayName": "received_at",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "job_ref",
+              "displayName": "job_ref",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "full_name",
+              "displayName": "full_name",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "email",
+              "displayName": "email",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "phone",
+              "displayName": "phone",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "location",
+              "displayName": "location",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "current_title",
+              "displayName": "current_title",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "current_employer",
+              "displayName": "current_employer",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "years_experience",
+              "displayName": "years_experience",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "key_skills",
+              "displayName": "key_skills",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "salary_expectation",
+              "displayName": "salary_expectation",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "right_to_work",
+              "displayName": "right_to_work",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "fit_score",
+              "displayName": "fit_score",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "band",
+              "displayName": "band",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "rationale",
+              "displayName": "rationale",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "flags",
+              "displayName": "flags",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "zoho_candidate_id",
+              "displayName": "zoho_candidate_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "zoho_candidate_url",
+              "displayName": "zoho_candidate_url",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "zoho_job_id",
+              "displayName": "zoho_job_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "zoho_client_id",
+              "displayName": "zoho_client_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "cv_filename",
+              "displayName": "cv_filename",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        1936,
+        0
+      ],
+      "id": "bd913f08-35a3-46b7-9e88-1c2dec364ff5",
+      "name": "Append row in sheet",
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "CRED_GSHEETS",
+          "name": "Google Sheets OAuth2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "WF_ATS_ADAPTER_ZOHO",
+          "mode": "list",
+          "cachedResultUrl": "/workflow/WF_ATS_ADAPTER_ZOHO",
+          "cachedResultName": "ATS adapter - Zoho"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {},
+          "matchingColumns": [],
+          "schema": [],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.4,
+      "position": [
+        1712,
+        0
+      ],
+      "id": "1ca599cf-ce5e-4868-a4fe-0221367105fa",
+      "name": "Call 'ATS adapter - Zoho'"
+    },
+    {
+      "parameters": {
+        "jsCode": "const flat = $input.first().json;\nconst job = $('Get job spec').first().json;\nconst email = $('Gmail Trigger').first();\n\nreturn [{\n  json: {\n    ...flat,\n    job_ref: String(flat.job_ref ?? '').trim(),\n    zoho_job_id: String(job.zoho_job_id ?? '').trim(),\n    zoho_client_id: String(job.zoho_client_id ?? '').trim(),\n    cv_filename: email.binary?.attachment_0?.fileName ?? 'cv.pdf'\n  },\n  binary: email.binary\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1488,
+        0
+      ],
+      "id": "8ff791d3-2f0e-4096-aeb3-4689ca6731c8",
+      "name": "Prepare for ATS"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "c1",
+              "name": "agency_name",
+              "type": "string",
+              "value": "Kestrel Technical Recruitment"
+            },
+            {
+              "id": "c2",
+              "name": "brand_primary",
+              "type": "string",
+              "value": "#0ea672"
+            },
+            {
+              "id": "c3",
+              "name": "brand_ink",
+              "type": "string",
+              "value": "#111827"
+            },
+            {
+              "id": "c4",
+              "name": "consultant_name",
+              "type": "string",
+              "value": "Jamie Hamilton"
+            },
+            {
+              "id": "c5",
+              "name": "consultant_email",
+              "type": "string",
+              "value": "owner@example.com"
+            },
+            {
+              "id": "c6",
+              "name": "agency_website",
+              "type": "string",
+              "value": ""
+            },
+            {
+              "id": "c7",
+              "name": "fallback_email",
+              "type": "string",
+              "value": "owner@example.com"
+            },
+            {
+              "id": "c8",
+              "name": "ats_label",
+              "type": "string",
+              "value": "Zoho"
+            },
+            {
+              "id": "c9",
+              "name": "client",
+              "type": "string",
+              "value": "kestrel"
+            },
+            {
+              "id": "c10",
+              "name": "hooks_base",
+              "type": "string",
+              "value": "https://hooks.example.com"
+            },
+            {
+              "id": "c11",
+              "name": "log_sheet_id",
+              "type": "string",
+              "value": "SHEET_ID_SCREENING_LOG"
+            }
+          ]
+        },
+        "includeOtherFields": true,
+        "options": {}
+      },
+      "id": "3ea4fbc4-467d-4f24-a347-df37c3584e50",
+      "name": "Config",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.5,
+      "position": [
+        2048,
+        0
+      ]
+    },
+    {
+      "id": "ae1a9636-a540-4faf-8e04-25b6290959ef",
+      "name": "Build approval card",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2496,
+        0
+      ],
+      "parameters": {
+        "jsCode": "// Build approval card - consultant-facing email in the OpsAutomated email design system (same tokens as the digest).\n// Buttons go to the decision gateway (M3b) with the approval token; state lives in ops.approvals, not in this execution.\nconst c = $(\"Call 'ATS adapter - Zoho'\").item.json;\nconst cfg = $('Config').item.json;\nconst job = $('Get job spec').item.json;\nconst token = $input.first().json.token;\nconst hooks = (cfg.hooks_base || 'https://hooks.example.com').replace(/\\/$/, '');\n\nconst esc = s => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');\nconst font = \"-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif\";\nconst ink = cfg.brand_ink || '#111827', primary = cfg.brand_primary || '#0ea672';\nconst muted = '#6b7280', faint = '#9ca3af', line = '#e5e7eb', bg = '#f3f4f6';\nconst bands = { A: { bg: '#d1fae5', fg: '#065f46' }, B: { bg: '#fef3c7', fg: '#92400e' }, C: { bg: '#e5e7eb', fg: '#374151' } };\nconst band = bands[String(c.band || '').toUpperCase()] ? String(c.band).toUpperCase() : 'C';\nconst b = bands[band];\nconst first = String(c.full_name || '').trim().split(/\\s+/)[0] || 'the candidate';\nconst agency = cfg.agency_name || 'Your agency';\nconst ats = cfg.ats_label || 'ATS';\nconst flags = String(c.flags || '').split(/[;,|]\\s*/).map(s => s.trim()).filter(f => f && !/^none$/i.test(f));\nconst role = [c.current_title, c.current_employer].filter(Boolean).join(' at ');\nconst skills = String(c.key_skills || '').split(/,\\s*/).filter(Boolean);\nconst skillsText = skills.length > 8 ? skills.slice(0, 8).join(', ') + ` and ${skills.length - 8} more` : skills.join(', ');\nconst received = (() => { const t = new Date(c.received_at); return isNaN(t) ? '' : t.toLocaleString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', timeZone: 'Europe/London' }); })();\nconst approveUrl = `${hooks}/webhook/decide?t=${encodeURIComponent(token)}&d=approve`;\nconst holdUrl = `${hooks}/webhook/decide?t=${encodeURIComponent(token)}&d=hold`;\n\nconst fact = (k, v) => `<tr><td style=\"padding:6px 12px 6px 0;font:13px/1.4 ${font};color:${muted};width:120px;vertical-align:top;white-space:nowrap;\">${esc(k)}</td><td style=\"padding:6px 0;font:14px/1.4 ${font};color:${ink};\">${esc(v || 'not stated')}</td></tr>`;\n\nconst html = `<!doctype html><html><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><title>${esc(agency)}</title></head>\n<body style=\"margin:0;padding:0;background:${bg};\">\n<table role=\"presentation\" width=\"100%\" cellpadding=\"0\" cellspacing=\"0\" style=\"background:${bg};\">\n<tr><td align=\"center\" style=\"padding:0 0 32px;\">\n<table role=\"presentation\" width=\"100%\" cellpadding=\"0\" cellspacing=\"0\" style=\"max-width:560px;\">\n  <tr><td><div style=\"height:4px;background:${primary};border-radius:0 0 2px 2px;\"></div></td></tr>\n  <tr><td style=\"padding:22px 20px 14px;\">\n    <table role=\"presentation\" width=\"100%\" cellpadding=\"0\" cellspacing=\"0\"><tr>\n      <td style=\"font:700 15px/1 ${font};color:${ink};\">${esc(agency)}</td>\n      <td align=\"right\" style=\"font:13px/1 ${font};color:${muted};\">New application</td>\n    </tr></table>\n  </td></tr>\n  <tr><td style=\"padding:0 20px;\">\n    <table role=\"presentation\" width=\"100%\" cellpadding=\"0\" cellspacing=\"0\" style=\"background:#ffffff;border:1px solid ${line};border-radius:12px;\">\n      <tr><td style=\"padding:20px 20px 0;\">\n        <div style=\"font:600 11px/1 ${font};letter-spacing:.08em;text-transform:uppercase;color:${faint};\">${esc(c.job_ref)}</div>\n        <div style=\"margin-top:4px;font:700 20px/1.25 ${font};color:${ink};letter-spacing:-.01em;\">${esc(job.title || 'Role')}</div>\n      </td></tr>\n      <tr><td style=\"padding:18px 20px 0;\">\n        <table role=\"presentation\" width=\"100%\" cellpadding=\"0\" cellspacing=\"0\"><tr>\n          <td width=\"56\" valign=\"top\" style=\"padding-right:14px;\"><div style=\"width:56px;height:56px;border-radius:12px;background:${b.bg};color:${b.fg};font:700 22px/56px ${font};text-align:center;\">${esc(c.fit_score)}</div></td>\n          <td valign=\"top\">\n            <div style=\"font:600 18px/1.3 ${font};color:${ink};\">${esc(c.full_name)}</div>\n            ${role ? `<div style=\"margin-top:2px;font:13px/1.4 ${font};color:${muted};\">${esc(role)}</div>` : ''}\n            <div style=\"margin-top:8px;\"><span style=\"display:inline-block;padding:3px 9px;border-radius:999px;background:${b.bg};color:${b.fg};font:600 11px/1 ${font};letter-spacing:.06em;text-transform:uppercase;\">Band ${band}</span>${received ? ` <span style=\"font:12px/1 ${font};color:${faint};padding-left:6px;\">Applied ${esc(received)}</span>` : ''}</div>\n          </td>\n        </tr></table>\n      </td></tr>\n      <tr><td style=\"padding:16px 20px 0;font:15px/1.55 ${font};color:${ink};\">${esc(c.rationale)}</td></tr>\n      ${flags.length ? `<tr><td style=\"padding:12px 20px 0;\"><table role=\"presentation\" cellpadding=\"0\" cellspacing=\"0\"><tr><td style=\"padding:6px 10px;border-radius:6px;background:#fff7ed;border:1px solid #fed7aa;font:13px/1.4 ${font};color:#9a3412;\">${flags.map(esc).join(' &nbsp;&middot;&nbsp; ')}</td></tr></table></td></tr>` : ''}\n      <tr><td style=\"padding:16px 20px 0;\">\n        <table role=\"presentation\" width=\"100%\" cellpadding=\"0\" cellspacing=\"0\" style=\"border-top:1px solid ${line};\">\n          <tr><td colspan=\"2\" style=\"height:8px;font-size:0;\">&nbsp;</td></tr>\n          ${fact('Location', c.location)}\n          ${fact('Experience', c.years_experience ? c.years_experience + ' years' : '')}\n          ${fact('Salary', c.salary_expectation)}\n          ${fact('Right to work', c.right_to_work)}\n          ${fact('Skills', skillsText)}\n        </table>\n        ${c.zoho_candidate_url ? `<div style=\"margin-top:10px;font:13px/1.4 ${font};color:${muted};\">Filed in ${esc(ats)} with the CV and a note. <a href=\"${esc(c.zoho_candidate_url)}\" style=\"color:${primary};text-decoration:none;font-weight:600;\">Open in ${esc(ats)} &rarr;</a></div>` : ''}\n      </td></tr>\n      <tr><td style=\"padding:20px 20px 20px;\">\n        <table role=\"presentation\" width=\"100%\" cellpadding=\"0\" cellspacing=\"0\"><tr>\n          <td style=\"padding-right:8px;\"><a href=\"${esc(approveUrl)}\" style=\"display:block;padding:13px 16px;border-radius:8px;background:${ink};color:#ffffff;font:600 14px/1 ${font};text-align:center;text-decoration:none;\">Reply to ${esc(first)}</a></td>\n          <td width=\"110\"><a href=\"${esc(holdUrl)}\" style=\"display:block;padding:12px 16px;border-radius:8px;border:1px solid ${line};background:#ffffff;color:${ink};font:600 14px/1 ${font};text-align:center;text-decoration:none;\">Hold</a></td>\n        </tr></table>\n        <div style=\"margin-top:10px;font:12px/1.5 ${font};color:${faint};\">Reply sends ${esc(first)} the Band ${band} acknowledgement from ${esc(agency)}, with you as reply-to. Nothing is sent until you choose. Hold keeps ${esc(first)} in the digest until you decide.</div>\n      </td></tr>\n    </table>\n  </td></tr>\n  <tr><td style=\"padding:12px 20px 0;font:12px/1.6 ${font};color:${faint};\">Run for ${esc(agency)} by OpsAutomated.</td></tr>\n</table>\n</td></tr></table></body></html>`;\n\nconst subject = `${band === 'A' ? '\\u{1F525} ' : ''}Band ${band} · ${c.full_name} for ${c.job_ref} (${c.fit_score}/10)`;\nreturn [{ json: { to: cfg.consultant_email, subject, html, approveUrl, holdUrl, token } }];"
+      }
+    },
+    {
+      "id": "c6bb4474-2e8f-4255-b6e1-0f97dcf61ef4",
+      "name": "Send approval card",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.2,
+      "position": [
+        2720,
+        0
+      ],
+      "parameters": {
+        "message": "={{ $json.html }}",
+        "options": {
+          "appendAttribution": false,
+          "senderName": "={{ $('Config').item.json.agency_name }}"
+        },
+        "sendTo": "={{ $json.to }}",
+        "subject": "={{ $json.subject }}"
+      },
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "CRED_GMAIL",
+          "name": "Gmail OAuth2"
+        }
+      },
+      "webhookId": "00000000-0000-4000-8000-000000000001"
+    },
+    {
+      "id": "c1adc0a5-9d99-4b71-9418-7185327d5ca9",
+      "name": "Create approval",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        2272,
+        0
+      ],
+      "parameters": {
+        "authentication": "predefinedCredentialType",
+        "jsonBody": "={{ (() => { const c = $(\"Call 'ATS adapter - Zoho'\").item.json; const cfg = $('Config').item.json; const job = $('Get job spec').item.json; const pick = (o, keys) => Object.fromEntries(keys.filter(k => k in o).map(k => [k, o[k]])); return JSON.stringify({ p_client: cfg.client || 'kestrel', p_received_at: String(c.received_at), p_job_ref: String(c.job_ref || ''), p_candidate: pick(c, ['full_name','email','phone','location','current_title','current_employer','years_experience','key_skills','salary_expectation','right_to_work','fit_score','band','rationale','flags','zoho_candidate_id','zoho_candidate_url','job_ref','received_at']), p_job: pick(job, ['job_ref','title','zoho_job_id','zoho_client_id']), p_cfg: pick(cfg, ['agency_name','brand_primary','brand_ink','consultant_name','consultant_email','agency_website','fallback_email','ats_label','client','hooks_base','log_sheet_id']) }); })() }}",
+        "method": "POST",
+        "nodeCredentialType": "supabaseApi",
+        "options": {
+          "timeout": 30000
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "url": "https://YOUR_SUPABASE_PROJECT_REF.supabase.co/rest/v1/rpc/ops_create_approval"
+      },
+      "credentials": {
+        "supabaseApi": {
+          "id": "CRED_SUPABASE",
+          "name": "Supabase (service role)"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Gmail Trigger": {
+      "main": [
+        [
+          {
+            "node": "Extract from File",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract from File": {
+      "main": [
+        [
+          {
+            "node": "Parse email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse email": {
+      "main": [
+        [
+          {
+            "node": "Get job spec",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get job spec": {
+      "main": [
+        [
+          {
+            "node": "Basic LLM Chain",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Anthropic Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Basic LLM Chain",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Structured Output Parser": {
+      "ai_outputParser": [
+        [
+          {
+            "node": "Basic LLM Chain",
+            "type": "ai_outputParser",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Anthropic Chat Model1": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Structured Output Parser",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Basic LLM Chain": {
+      "main": [
+        [
+          {
+            "node": "Flatten",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Flatten": {
+      "main": [
+        [
+          {
+            "node": "Prepare for ATS",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Call 'ATS adapter - Zoho'": {
+      "main": [
+        [
+          {
+            "node": "Append row in sheet",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare for ATS": {
+      "main": [
+        [
+          {
+            "node": "Call 'ATS adapter - Zoho'",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Append row in sheet": {
+      "main": [
+        [
+          {
+            "node": "Config",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build approval card": {
+      "main": [
+        [
+          {
+            "node": "Send approval card",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Config": {
+      "main": [
+        [
+          {
+            "node": "Create approval",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create approval": {
+      "main": [
+        [
+          {
+            "node": "Build approval card",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "nodeGroups": [
+    {
+      "id": "96253d31-b468-45ce-a18b-0c45c288bcd7",
+      "name": "Intake",
+      "nodeIds": [
+        "c07362af-f98e-4e05-9a37-a8b303ef1722",
+        "5bbc561d-e288-443b-a5ad-fa5d1ace7302",
+        "bfd56462-22df-4e7a-9dee-334352118618"
+      ],
+      "description": "CV text out of the PDF, job ref out of the subject, spec from the jobs sheet"
+    },
+    {
+      "id": "33eef7ac-5043-4991-83a2-cbdffbd01cfc",
+      "name": "File to ATS",
+      "nodeIds": [
+        "8ff791d3-2f0e-4096-aeb3-4689ca6731c8",
+        "1ca599cf-ce5e-4868-a4fe-0221367105fa",
+        "bd913f08-35a3-46b7-9e88-1c2dec364ff5"
+      ],
+      "description": "Candidate into Zoho with CV, note, tag and job; mirrored to the screening log"
+    },
+    {
+      "id": "27ed61b9-75b1-4aca-9b21-8f1e90355b95",
+      "name": "Ask the consultant",
+      "nodeIds": [
+        "3ea4fbc4-467d-4f24-a347-df37c3584e50",
+        "c1adc0a5-9d99-4b71-9418-7185327d5ca9",
+        "ae1a9636-a540-4faf-8e04-25b6290959ef",
+        "c6bb4474-2e8f-4255-b6e1-0f97dcf61ef4"
+      ],
+      "description": "Approval row in Supabase, branded card to the consultant; Reply / Hold go to the decision gateway (M3b)"
+    },
+    {
+      "id": "a7db2169-7b4c-489c-8253-cc284f3be2ea",
+      "name": "Screen",
+      "nodeIds": [
+        "f85adff0-5be8-406d-86eb-f18e2c34f5e7",
+        "97d0b8eb-771e-4062-b5d6-d0eb3a3e0376",
+        "96c5beb2-feb4-408b-94db-f9789ef23438",
+        "cd9deaeb-a639-4ace-bf6e-ef816a550b2d",
+        "553be2a8-2146-4242-b016-bf87004ee581"
+      ],
+      "description": "Sonnet reads the CV against the spec: score, band, 40-word rationale, flags"
+    }
+  ],
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "timeSavedMode": "fixed",
+    "errorWorkflow": "WF_ERROR_ALERT",
+    "callerPolicy": "workflowsFromSameOwner",
+    "availableInMCP": true
+  },
+  "tags": []
+}

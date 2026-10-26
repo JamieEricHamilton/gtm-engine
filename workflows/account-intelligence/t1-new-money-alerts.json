@@ -1,0 +1,240 @@
+{
+  "id": "WF_T1_NEW_MONEY_ALERTS",
+  "name": "AI T1 - New money alerts",
+  "description": "Every 5 min: next confident raise goes to Jamie's Telegram. Not-in-book raises carry Mine / Owned buttons handled in-app by T0; raises on Jamie's own accounts are a plain heads-up.",
+  "nodes": [
+    {
+      "id": "e2f498fb-ec00-4da1-8742-3a13abfa35ce",
+      "name": "Every 5 min",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.3,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 5
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "d8bc0224-97e7-4534-a46d-c917ad63afcc",
+      "name": "Next alert (Supabase RPC)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        224,
+        96
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "https://YOUR_SUPABASE_PROJECT_REF.supabase.co/rest/v1/rpc/intel_alert_next",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "supabaseApi",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({}) }}",
+        "options": {
+          "timeout": 60000
+        }
+      },
+      "credentials": {
+        "supabaseApi": {
+          "id": "CRED_SUPABASE",
+          "name": "Supabase (service role)"
+        }
+      },
+      "executeOnce": true,
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000
+    },
+    {
+      "id": "93c81828-d061-4f6a-aeb5-7551f7337261",
+      "name": "Run now (manual)",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        192
+      ],
+      "parameters": {}
+    },
+    {
+      "id": "02fb54e3-948f-4c9d-a7e6-c88b59d41f8b",
+      "name": "Heads-up (your account)",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        672,
+        192
+      ],
+      "parameters": {
+        "resource": "message",
+        "operation": "sendMessage",
+        "chatId": "={{ $json.chat_id }}",
+        "text": "={{ $json.text }}",
+        "additionalFields": {
+          "appendAttribution": false
+        }
+      },
+      "credentials": {
+        "telegramApi": {
+          "id": "CRED_TELEGRAM_ALERTS",
+          "name": "Telegram alerts bot"
+        }
+      },
+      "webhookId": "00000000-0000-4000-8000-000000000015"
+    },
+    {
+      "id": "b67f445c-8dbd-4ea5-8fc6-5be64a3b7d6b",
+      "name": "Needs a decision?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        448,
+        96
+      ],
+      "parameters": {
+        "conditions": {
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "k1",
+              "leftValue": "={{ String($json.kind) }}",
+              "operator": {
+                "operation": "equals",
+                "type": "string"
+              },
+              "rightValue": "net_new"
+            }
+          ],
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 3
+          }
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "21272a60-2d22-4029-9f32-cfdd2461a8e8",
+      "name": "Alert with buttons",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        672,
+        0
+      ],
+      "parameters": {
+        "additionalFields": {
+          "appendAttribution": false
+        },
+        "chatId": "={{ $json.chat_id }}",
+        "inlineKeyboard": {
+          "rows": [
+            {
+              "row": {
+                "buttons": [
+                  {
+                    "additionalFields": {
+                      "callback_data": "=mine:{{ $json.alert_id }}"
+                    },
+                    "text": "Mine"
+                  },
+                  {
+                    "additionalFields": {
+                      "callback_data": "=owned:{{ $json.alert_id }}"
+                    },
+                    "text": "Owned"
+                  }
+                ]
+              }
+            }
+          ]
+        },
+        "operation": "sendMessage",
+        "replyMarkup": "inlineKeyboard",
+        "resource": "message",
+        "text": "={{ $json.text }}"
+      },
+      "credentials": {
+        "telegramApi": {
+          "id": "CRED_TELEGRAM_ALERTS",
+          "name": "Telegram alerts bot"
+        }
+      },
+      "webhookId": "00000000-0000-4000-8000-000000000016"
+    }
+  ],
+  "connections": {
+    "Every 5 min": {
+      "main": [
+        [
+          {
+            "node": "Next alert (Supabase RPC)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Run now (manual)": {
+      "main": [
+        [
+          {
+            "node": "Next alert (Supabase RPC)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Next alert (Supabase RPC)": {
+      "main": [
+        [
+          {
+            "node": "Needs a decision?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Needs a decision?": {
+      "main": [
+        [
+          {
+            "node": "Alert with buttons",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Heads-up (your account)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "nodeGroups": [],
+  "settings": {
+    "executionOrder": "v1",
+    "availableInMCP": true,
+    "errorWorkflow": "WF_ERROR_ALERT",
+    "timezone": "Europe/London",
+    "saveDataSuccessExecution": "none"
+  },
+  "tags": []
+}

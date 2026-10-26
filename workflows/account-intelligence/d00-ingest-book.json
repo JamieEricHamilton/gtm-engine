@@ -1,0 +1,227 @@
+{
+  "id": "WF_D00_INGEST_BOOK",
+  "name": "AI D0 - Ingest book",
+  "description": "One-off: read the raw the vendor book of business from a Google Sheet and upsert into account_intel.accounts via public.intel_upsert_accounts.",
+  "nodes": [
+    {
+      "id": "798aaa2b-bc2f-4852-99ba-df15f5448341",
+      "name": "Sticky Note c00151e6",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        0,
+        300
+      ],
+      "parameters": {
+        "content": "## D0 - Ingest\nOne-off. Reads the raw book of business from a Google Sheet and upserts into account_intel.accounts via public.intel_upsert_accounts (domain canonicalised, dedupe on domain then normalised name).\n\nRe-running is safe: existing accounts are updated, not duplicated.",
+        "color": 4,
+        "width": 420,
+        "height": 180
+      }
+    },
+    {
+      "id": "1c98d3f3-c3d6-464d-9b2f-933b2a273b27",
+      "name": "Run ingest (manual)",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {}
+    },
+    {
+      "id": "c7f408e3-fa2d-43ca-ae23-bd8a8debb98b",
+      "name": "Config",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.5,
+      "position": [
+        224,
+        0
+      ],
+      "parameters": {
+        "mode": "manual",
+        "assignments": {
+          "assignments": [
+            {
+              "id": "c1",
+              "name": "sheet_url",
+              "type": "string",
+              "value": "https://docs.google.com/spreadsheets/d/SHEET_ID_RAW_ACCOUNT_LIST/edit"
+            },
+            {
+              "id": "c2",
+              "name": "sheet_tab",
+              "type": "string",
+              "value": "Sheet1"
+            },
+            {
+              "id": "c3",
+              "name": "batch_size",
+              "type": "number",
+              "value": 250
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "b75bb036-3f78-436c-8f35-8797d9023f2c",
+      "name": "Read raw list",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        448,
+        0
+      ],
+      "parameters": {
+        "resource": "sheet",
+        "operation": "read",
+        "authentication": "oAuth2",
+        "documentId": {
+          "__rl": true,
+          "mode": "url",
+          "value": "={{ $json.sheet_url }}"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "={{ $json.sheet_tab }}"
+        },
+        "options": {}
+      },
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "CRED_GSHEETS_2",
+          "name": "Google Sheets OAuth2 (second account)"
+        }
+      },
+      "executeOnce": true
+    },
+    {
+      "id": "4210edd6-9436-4f24-a598-aed3ea9d2686",
+      "name": "Batch rows",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        672,
+        0
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// One item per batch of raw rows, shaped for public.intel_upsert_accounts(rows jsonb).\n// Column headers as imported from the xlsx: \"Account Name\", \"LinkedIn URL\", \"Website\".\nconst size = Number($('Config').first().json.batch_size) || 250;\nconst pick = (r, keys) => { for (const k of keys) { if (r[k] !== undefined && r[k] !== null && String(r[k]).trim() !== '') return String(r[k]).trim(); } return null; };\nconst rows = [];\nfor (const it of $input.all()) {\n  const r = it.json;\n  const name = pick(r, ['Account Name', 'name', 'Name', 'Account']);\n  if (!name) continue;\n  rows.push({\n    name,\n    linkedin_url: pick(r, ['LinkedIn URL', 'linkedin_url', 'LinkedIn']),\n    website: pick(r, ['Website', 'website', 'Domain'])\n  });\n}\nconst out = [];\nfor (let i = 0; i < rows.length; i += size) out.push({ json: { batch: out.length + 1, rows: rows.slice(i, i + size) } });\nreturn out;"
+      }
+    },
+    {
+      "id": "475210eb-8ed4-444a-96ac-a6e6ce389780",
+      "name": "Upsert accounts (Supabase RPC)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        896,
+        0
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "https://YOUR_SUPABASE_PROJECT_REF.supabase.co/rest/v1/rpc/intel_upsert_accounts",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "supabaseApi",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ rows: $json.rows }) }}",
+        "options": {
+          "batching": {
+            "batch": {
+              "batchSize": 1,
+              "batchInterval": 500
+            }
+          }
+        }
+      },
+      "credentials": {
+        "supabaseApi": {
+          "id": "CRED_SUPABASE",
+          "name": "Supabase (service role)"
+        }
+      }
+    },
+    {
+      "id": "938778fd-bd5f-4277-be89-ecd7fdcf8c42",
+      "name": "Summary",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1120,
+        0
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// Totals across batches. The RPC returns one row per call: {inserted, updated, skipped}.\nlet inserted = 0, updated = 0, skipped = 0, batches = 0;\nfor (const it of $input.all()) {\n  const r = Array.isArray(it.json) ? it.json[0] : it.json;\n  inserted += Number(r.inserted) || 0; updated += Number(r.updated) || 0; skipped += Number(r.skipped) || 0; batches++;\n}\nreturn [{ json: { batches, inserted, updated, skipped } }];"
+      }
+    }
+  ],
+  "connections": {
+    "Run ingest (manual)": {
+      "main": [
+        [
+          {
+            "node": "Config",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Config": {
+      "main": [
+        [
+          {
+            "node": "Read raw list",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read raw list": {
+      "main": [
+        [
+          {
+            "node": "Batch rows",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Batch rows": {
+      "main": [
+        [
+          {
+            "node": "Upsert accounts (Supabase RPC)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Upsert accounts (Supabase RPC)": {
+      "main": [
+        [
+          {
+            "node": "Summary",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "nodeGroups": [],
+  "settings": {
+    "executionOrder": "v1",
+    "availableInMCP": true
+  },
+  "tags": []
+}

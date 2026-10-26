@@ -1,0 +1,169 @@
+{
+  "id": "WF_D14_REGISTER_STREAM_INTAKE",
+  "name": "AI D14 - Register stream intake",
+  "description": "Receives every SH01 (share allotment) from the Companies House live stream via the listener container, looks up the company profile, and hands it to Supabase to filter, stage and (after the PDF amount) promote into a register-origin account.",
+  "nodes": [
+    {
+      "id": "f741f040-4006-4dba-9976-2a05bcf99a5d",
+      "name": "SH01 from the stream listener",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "REPLACE_WITH_RANDOM_PATH",
+        "responseMode": "onReceived",
+        "options": {}
+      },
+      "webhookId": "00000000-0000-4000-8000-000000000009"
+    },
+    {
+      "id": "58171f56-c184-416d-b7ad-1a32e87dacf0",
+      "name": "Pick filing fields",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        224,
+        0
+      ],
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// The listener posts the raw stream event: { resource_uri, resource_id, data, event }. Pull out what the intake needs.\n// Mode is \"run once for each item\", so return a single { json } object, not an array.\nconst b = $json.body || {};\nconst d = b.data || {};\nconst m = String(b.resource_uri || '').match(/\\/company\\/([^/]+)\\/filing-history\\/([^/?#]+)/);\nreturn { json: {\n  company_number: m ? m[1] : (b.company_number || null),\n  transaction_id: d.transaction_id || (m ? m[2] : b.resource_id) || null,\n  type: d.type || '', category: d.category || '', description: d.description || '',\n  date: d.date || null, action_date: (d.description_values && d.description_values.date) || d.action_date || null,\n  capital: (d.description_values && d.description_values.capital) || null,\n  doc: (d.links && d.links.document_metadata) || null,\n  timepoint: b.event && b.event.timepoint, published_at: b.event && b.event.published_at\n} };"
+      }
+    },
+    {
+      "id": "3acbdc18-8f2b-4799-8217-63d82ccdeac0",
+      "name": "Company profile (Companies House)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        448,
+        0
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "=https://api.company-information.service.gov.uk/company/{{ $json.company_number }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBasicAuth",
+        "options": {
+          "timeout": 20000,
+          "response": {
+            "response": {
+              "responseFormat": "text",
+              "outputPropertyName": "body",
+              "neverError": true
+            }
+          }
+        }
+      },
+      "credentials": {
+        "httpBasicAuth": {
+          "id": "CRED_COMPANIES_HOUSE",
+          "name": "Companies House API (basic auth)"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "af70d8cb-d7af-4e45-8d43-da3a4940aaf1",
+      "name": "Build intake event",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        672,
+        0
+      ],
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// Mode is \"run once for each item\", so return a single { json } object, not an array.\nconst f = $('Pick filing fields').item.json;\nlet p = {}; try { p = JSON.parse(String($json.body || '{}')); } catch (e) { p = {}; }\nconst profile = { company_name: p.company_name, company_status: p.company_status, type: p.type, date_of_creation: p.date_of_creation, sic_codes: p.sic_codes || [], registered_office_address: p.registered_office_address, accounts: p.accounts, has_charges: p.has_charges };\nreturn { json: { p_event: Object.assign({}, f, { profile }) } };"
+      }
+    },
+    {
+      "id": "4f365b7d-5864-4906-b510-3d07b7de7012",
+      "name": "Register intake (Supabase RPC)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        896,
+        0
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "https://YOUR_SUPABASE_PROJECT_REF.supabase.co/rest/v1/rpc/intel_register_intake",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "supabaseApi",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ p_event: $json.p_event }) }}",
+        "options": {
+          "timeout": 60000
+        }
+      },
+      "credentials": {
+        "supabaseApi": {
+          "id": "CRED_SUPABASE",
+          "name": "Supabase (service role)"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "SH01 from the stream listener": {
+      "main": [
+        [
+          {
+            "node": "Pick filing fields",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Pick filing fields": {
+      "main": [
+        [
+          {
+            "node": "Company profile (Companies House)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Company profile (Companies House)": {
+      "main": [
+        [
+          {
+            "node": "Build intake event",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build intake event": {
+      "main": [
+        [
+          {
+            "node": "Register intake (Supabase RPC)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "nodeGroups": [],
+  "settings": {
+    "executionOrder": "v1",
+    "availableInMCP": true,
+    "errorWorkflow": "WF_ERROR_ALERT",
+    "timezone": "Europe/London",
+    "saveDataSuccessExecution": "none",
+    "executionTimeout": 120
+  },
+  "tags": []
+}

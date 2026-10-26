@@ -1,0 +1,298 @@
+{
+  "id": "WF_D13B_SH01_AMOUNTS",
+  "name": "AI D13b - SH01 amounts",
+  "description": "Reads each SH01 filing PDF from Companies House and works out what was actually paid for the shares, so a register-only raise is only trusted when real money changed hands.",
+  "nodes": [
+    {
+      "id": "4a391068-f44d-4210-995e-0f7b9c69b243",
+      "name": "Every 10 min",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.3,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 10
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "a9dbca1d-edf4-40a2-b09b-8874590706bd",
+      "name": "Load SH01s to read (Supabase RPC)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        224,
+        96
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "https://YOUR_SUPABASE_PROJECT_REF.supabase.co/rest/v1/rpc/intel_filings_to_parse",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "supabaseApi",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ p_limit: 20 }) }}",
+        "options": {
+          "timeout": 60000
+        }
+      },
+      "credentials": {
+        "supabaseApi": {
+          "id": "CRED_SUPABASE",
+          "name": "Supabase (service role)"
+        }
+      },
+      "executeOnce": true
+    },
+    {
+      "id": "a8da3548-35a3-445f-8321-408222563a25",
+      "name": "Run now (manual)",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        192
+      ],
+      "parameters": {}
+    },
+    {
+      "id": "0bb043a7-227c-426b-a5e2-b97b91e96024",
+      "name": "Get document location",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        448,
+        96
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $json.doc_url }}/content",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBasicAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Accept",
+              "value": "application/pdf"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 20000,
+          "redirect": {
+            "redirect": {
+              "followRedirects": false
+            }
+          },
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "responseFormat": "text",
+              "neverError": true
+            }
+          },
+          "batching": {
+            "batch": {
+              "batchSize": 2,
+              "batchInterval": 1100
+            }
+          }
+        }
+      },
+      "credentials": {
+        "httpBasicAuth": {
+          "id": "CRED_COMPANIES_HOUSE",
+          "name": "Companies House API (basic auth)"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "5e0fbce9-6cbb-4e56-9406-e587c2786b9d",
+      "name": "Download PDF",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        672,
+        96
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $json.headers.location }}",
+        "options": {
+          "timeout": 30000,
+          "response": {
+            "response": {
+              "responseFormat": "file",
+              "outputPropertyName": "data"
+            }
+          }
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "2cf0862f-f428-4e03-abf6-9a2b04e36cbc",
+      "name": "Extract PDF text",
+      "type": "n8n-nodes-base.extractFromFile",
+      "typeVersion": 1,
+      "position": [
+        896,
+        96
+      ],
+      "parameters": {
+        "operation": "pdf",
+        "binaryPropertyName": "data",
+        "options": {}
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "49aeb54a-c5ab-4a9e-bb9d-1c9422897420",
+      "name": "Parse allotment",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1120,
+        96
+      ],
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// SH01 form: a table of shares allotted with number allotted, nominal value and amount paid (including premium) per share. Raised = sum(number x amount paid).\nconst f = $('Load SH01s to read (Supabase RPC)').item.json;\nconst text = String($json.text || '').replace(/\\s+/g, ' ');\nconst num = s => Number(String(s).replace(/[^0-9.]/g, ''));\nlet shares = 0, amount = 0, rows = 0;\n// pattern A (webfiled PDFs): Class of shares ... Number allotted N ... Nominal value of each share X ... Amount paid (including any share premium) on each share Y\nconst reA = /Number\\s+allotted\\s*:?\\s*([0-9,.]+)[\\s\\S]{0,400}?Amount\\s+paid[^0-9]{0,80}?([0-9,.]+)/gi;\nlet m;\nwhile ((m = reA.exec(text))) { const n = num(m[1]), p = num(m[2]); if (n > 0 && p >= 0) { shares += n; amount += n * p; rows++; } }\nconst note = rows ? ('rows=' + rows) : ('no table match; sample: ' + text.slice(0, 220));\nreturn { json: { p_account_id: f.account_id, p_transaction_id: f.transaction_id, p_amount: rows ? Math.round(amount) : null, p_shares: rows ? Math.round(shares) : null, p_note: note } };"
+      }
+    },
+    {
+      "id": "d518cbfb-29e4-4885-a5dc-8215054001cc",
+      "name": "Save amount (Supabase RPC)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        1344,
+        96
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "https://YOUR_SUPABASE_PROJECT_REF.supabase.co/rest/v1/rpc/intel_save_allotment_amount",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "supabaseApi",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json) }}",
+        "options": {
+          "timeout": 60000,
+          "batching": {
+            "batch": {
+              "batchSize": 5,
+              "batchInterval": 200
+            }
+          }
+        }
+      },
+      "credentials": {
+        "supabaseApi": {
+          "id": "CRED_SUPABASE",
+          "name": "Supabase (service role)"
+        }
+      },
+      "onError": "continueRegularOutput"
+    }
+  ],
+  "connections": {
+    "Every 10 min": {
+      "main": [
+        [
+          {
+            "node": "Load SH01s to read (Supabase RPC)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Load SH01s to read (Supabase RPC)": {
+      "main": [
+        [
+          {
+            "node": "Get document location",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Run now (manual)": {
+      "main": [
+        [
+          {
+            "node": "Load SH01s to read (Supabase RPC)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get document location": {
+      "main": [
+        [
+          {
+            "node": "Download PDF",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Download PDF": {
+      "main": [
+        [
+          {
+            "node": "Extract PDF text",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract PDF text": {
+      "main": [
+        [
+          {
+            "node": "Parse allotment",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse allotment": {
+      "main": [
+        [
+          {
+            "node": "Save amount (Supabase RPC)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "nodeGroups": [],
+  "settings": {
+    "executionOrder": "v1",
+    "availableInMCP": true,
+    "errorWorkflow": "WF_ERROR_ALERT",
+    "timezone": "Europe/London",
+    "saveDataSuccessExecution": "none",
+    "executionTimeout": 540
+  },
+  "tags": []
+}

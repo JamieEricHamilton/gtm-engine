@@ -1,0 +1,247 @@
+{
+  "id": "WF_DAILY_DIGEST",
+  "name": "M5 - Daily digest",
+  "description": null,
+  "nodes": [
+    {
+      "id": "28506c96-c32a-4917-b9d8-0da899dd8556",
+      "name": "Schedule Trigger",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.4,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "triggerAtHour": 8
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "dbde0c86-83c1-4864-885e-4b64d943da35",
+      "name": "Get jobs",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "alwaysOutputData": true,
+      "position": [
+        384,
+        0
+      ],
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "value": "SHEET_ID_DEMO_JOBS",
+          "mode": "list",
+          "cachedResultName": "Kestrel jobs",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/SHEET_ID_DEMO_JOBS/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 1096514714,
+          "mode": "list",
+          "cachedResultName": "kestrel-jobs",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/SHEET_ID_DEMO_JOBS/edit#gid=1096514714"
+        },
+        "options": {}
+      },
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "CRED_GSHEETS",
+          "name": "Google Sheets OAuth2"
+        }
+      }
+    },
+    {
+      "id": "4deb155d-72c4-4333-956f-06aa677cea99",
+      "name": "Get log",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "executeOnce": true,
+      "alwaysOutputData": true,
+      "position": [
+        608,
+        0
+      ],
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "value": "SHEET_ID_SCREENING_LOG",
+          "mode": "list",
+          "cachedResultName": "Kestrel screening log",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/SHEET_ID_SCREENING_LOG/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "gid=0",
+          "mode": "list",
+          "cachedResultName": "Sheet1",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/SHEET_ID_SCREENING_LOG/edit#gid=0"
+        },
+        "options": {}
+      },
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "CRED_GSHEETS",
+          "name": "Google Sheets OAuth2"
+        }
+      }
+    },
+    {
+      "id": "4f48fdae-f726-416b-ab42-6a9069095e41",
+      "name": "Build digest",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        832,
+        0
+      ],
+      "parameters": {
+        "jsCode": "// Build digest - shared between the n8n Code node and the local preview.\n// In n8n: jobs = $('Get jobs').all().map(i=>i.json); cfg from $('Get config'); rows = $input.all()\nfunction buildDigest({ jobs, rows, cfg, now }) {\n  now = now || new Date();\n  const agency = cfg.agency_name || 'Your agency';\n  const windowHours = Number(cfg.digest_window_hours) || 24;\n  const atsLabel = cfg.ats_label || 'ATS';\n  const primary = cfg.brand_primary || '#0ea672';\n  const ink = cfg.brand_ink || '#111827';\n\n  const c = {\n    ink, primary,\n    muted: '#6b7280', faint: '#9ca3af', line: '#e5e7eb', bg: '#f3f4f6', card: '#ffffff',\n    warnBg: '#fff7ed', warnFg: '#9a3412', warnLine: '#fed7aa',\n  };\n  const band = {\n    A: { bg: '#d1fae5', fg: '#065f46', label: 'A' },\n    B: { bg: '#fef3c7', fg: '#92400e', label: 'B' },\n    C: { bg: '#e5e7eb', fg: '#374151', label: 'C' },\n  };\n\n  const esc = s => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');\n  const titleFor = {};\n  for (const j of jobs) titleFor[String(j.job_ref || '').trim()] = j.title;\n\n  const since = new Date(now.getTime() - windowHours * 3600 * 1000);\n  const fmtDate = now.toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long' });\n\n  const recent = rows.filter(r => {\n    const t = new Date(r.received_at);\n    return !isNaN(t) && t >= since && t <= now;\n  });\n  const bandOf = r => (band[String(r.band || '').toUpperCase()] ? String(r.band).toUpperCase() : 'C');\n  const isWaiting = r => !r.ack_status || r.ack_status === 'expired';\n  const flagsOf = r => String(r.flags || '').split(/[;,|]\\s*/).map(s => s.trim()).filter(f => f && !/^none$/i.test(f));\n\n  const byJob = {};\n  for (const r of recent) (byJob[String(r.job_ref || 'unknown').trim()] ||= []).push(r);\n  const count = { A: 0, B: 0, C: 0 };\n  for (const r of recent) count[bandOf(r)]++;\n  const waiting = recent.filter(isWaiting);\n  const sortedRefs = Object.keys(byJob).sort((a, b) => {\n    const wa = byJob[a].filter(isWaiting).length, wb = byJob[b].filter(isWaiting).length;\n    return wb - wa || a.localeCompare(b);\n  });\n\n  const status = r => {\n    if (r.ack_status === 'sent') return { text: 'Acknowledged', fg: '#065f46', waiting: false };\n    if (r.ack_status === 'held') return { text: 'On hold', fg: c.muted, waiting: false };\n    return { text: 'Awaiting your decision', fg: c.warnFg, waiting: true };\n  };\n  const firstSentence = s => { const m = String(s || '').match(/^.*?[.!?](\\s|$)/); return (m ? m[0] : String(s || '')).trim(); };\n\n  // ---------- plain text ----------\n  const text = [`${agency} - ${fmtDate}`, ''];\n  if (!recent.length) text.push(`No new applications in the last ${windowHours} hours.`);\n  else {\n    text.push(`${recent.length} new: ${count.A} A, ${count.B} B, ${count.C} C.${waiting.length ? ` ${waiting.length} awaiting your decision.` : ''}`, '');\n    for (const ref of sortedRefs) {\n      const list = byJob[ref].sort((a, b) => Number(b.fit_score) - Number(a.fit_score));\n      text.push(`${ref}${titleFor[ref] ? ' - ' + titleFor[ref] : ''} (${list.length})`);\n      for (const r of list.slice(0, 5)) {\n        text.push(`  ${r.fit_score}/10 ${bandOf(r)}  ${r.full_name}${r.current_title ? ' - ' + r.current_title : ''}${r.current_employer ? ' at ' + r.current_employer : ''} [${status(r).text}]`);\n        const why = firstSentence(r.rationale); if (why) text.push(`    ${why}`);\n        const fl = flagsOf(r); if (fl.length) text.push(`    Flags: ${fl.join('; ')}`);\n        if (r.zoho_candidate_url) text.push(`    ${r.zoho_candidate_url}`);\n      }\n      if (list.length > 5) text.push(`  and ${list.length - 5} more in ${atsLabel}`);\n      text.push('');\n    }\n  }\n\n  // ---------- html ----------\n  const font = \"-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif\";\n  const pill = b => `<span style=\"display:inline-block;padding:3px 9px;border-radius:999px;background:${band[b].bg};color:${band[b].fg};font:600 11px/1 ${font};letter-spacing:.06em;text-transform:uppercase;\">Band ${b}</span>`;\n  const score = (n, b) => `<td width=\"44\" valign=\"top\" style=\"padding:0 12px 0 0;\"><div style=\"width:44px;height:44px;border-radius:10px;background:${band[b].bg};color:${band[b].fg};font:700 18px/44px ${font};text-align:center;\">${esc(n)}</div></td>`;\n\n  const candidate = (r, last) => {\n    const b = bandOf(r), st = status(r), why = firstSentence(r.rationale), fl = flagsOf(r);\n    const role = [r.current_title, r.current_employer].filter(Boolean).join(' at ');\n    const cta = r.zoho_candidate_url\n      ? (st.waiting\n        ? `<a href=\"${esc(r.zoho_candidate_url)}\" style=\"display:inline-block;padding:10px 16px;border-radius:8px;background:${c.ink};color:#ffffff;font:600 13px/1 ${font};text-decoration:none;white-space:nowrap;\">Review in ${esc(atsLabel)} &rarr;</a>`\n        : `<a href=\"${esc(r.zoho_candidate_url)}\" style=\"color:${c.primary};font:600 13px/1 ${font};text-decoration:none;\">Open in ${esc(atsLabel)} &rarr;</a>`)\n      : '';\n    return `\n      <tr><td style=\"padding:16px 0 ${last ? '4px' : '16px'};${last ? '' : `border-bottom:1px solid ${c.line};`}\">\n        <table role=\"presentation\" width=\"100%\" cellpadding=\"0\" cellspacing=\"0\"><tr>\n          ${score(r.fit_score, b)}\n          <td valign=\"top\">\n            <table role=\"presentation\" width=\"100%\" cellpadding=\"0\" cellspacing=\"0\">\n              <tr>\n                <td style=\"font:600 16px/1.3 ${font};color:${c.ink};\">${esc(r.full_name)}</td>\n                <td align=\"right\" valign=\"top\" style=\"white-space:nowrap;padding-left:8px;\">${pill(b)}</td>\n              </tr>\n              ${role ? `<tr><td colspan=\"2\" style=\"padding-top:2px;font:13px/1.4 ${font};color:${c.muted};\">${esc(role)}</td></tr>` : ''}\n              ${why ? `<tr><td colspan=\"2\" style=\"padding-top:8px;font:14px/1.5 ${font};color:${c.ink};\">${esc(why)}</td></tr>` : ''}\n              ${fl.length ? `<tr><td colspan=\"2\" style=\"padding-top:8px;\"><table role=\"presentation\" cellpadding=\"0\" cellspacing=\"0\"><tr><td style=\"padding:6px 10px;border-radius:6px;background:${c.warnBg};border:1px solid ${c.warnLine};font:13px/1.4 ${font};color:${c.warnFg};\">${fl.map(esc).join(' &nbsp;&middot;&nbsp; ')}</td></tr></table></td></tr>` : ''}\n              <tr><td colspan=\"2\" style=\"padding-top:10px;font:600 13px/1.3 ${font};color:${st.fg};\">${st.text}</td></tr>\n              ${cta ? `<tr><td colspan=\"2\" align=\"right\" style=\"padding-top:10px;white-space:nowrap;\">${cta}</td></tr>` : ''}\n            </table>\n          </td>\n        </tr></table>\n      </td></tr>`;\n  };\n\n  let sections = '';\n  if (!recent.length) {\n    sections = `<table role=\"presentation\" width=\"100%\" cellpadding=\"0\" cellspacing=\"0\" style=\"background:${c.card};border:1px solid ${c.line};border-radius:12px;\"><tr><td style=\"padding:28px 24px;text-align:center;font:15px/1.5 ${font};color:${c.muted};\">No new applications in the last ${windowHours} hours.</td></tr></table>`;\n  } else {\n    for (const ref of sortedRefs) {\n      const list = byJob[ref].sort((a, b) => Number(b.fit_score) - Number(a.fit_score));\n      const w = list.filter(isWaiting).length;\n      const shown = list.slice(0, 5);\n      sections += `\n      <table role=\"presentation\" width=\"100%\" cellpadding=\"0\" cellspacing=\"0\" style=\"background:${c.card};border:1px solid ${c.line};border-radius:12px;margin:0 0 16px;\">\n        <tr><td style=\"padding:18px 20px 4px;\">\n          <table role=\"presentation\" width=\"100%\" cellpadding=\"0\" cellspacing=\"0\"><tr>\n            <td>\n              <div style=\"font:600 11px/1 ${font};letter-spacing:.08em;text-transform:uppercase;color:${c.faint};\">${esc(ref)}</div>\n              <div style=\"font:700 18px/1.3 ${font};color:${c.ink};margin-top:4px;\">${esc(titleFor[ref] || 'Role')}</div>\n            </td>\n            <td align=\"right\" valign=\"top\" style=\"white-space:nowrap;font:13px/1.4 ${font};color:${c.muted};\">${list.length} new${w ? `<br><span style=\"color:${c.warnFg};font-weight:600;\">${w} awaiting you</span>` : ''}</td>\n          </tr></table>\n        </td></tr>\n        <tr><td style=\"padding:0 20px 12px;\">\n          <table role=\"presentation\" width=\"100%\" cellpadding=\"0\" cellspacing=\"0\">\n            ${shown.map((r, i) => candidate(r, i === shown.length - 1)).join('')}\n            ${list.length > 5 ? `<tr><td style=\"padding:8px 0 4px;font:13px/1.4 ${font};color:${c.muted};\">and ${list.length - 5} more in ${esc(atsLabel)}</td></tr>` : ''}\n          </table>\n        </td></tr>\n      </table>`;\n    }\n  }\n\n  const stat = (n, label, fg) => `<td align=\"center\" style=\"padding:14px 4px;\"><div style=\"font:700 26px/1 ${font};color:${fg || c.ink};\">${n}</div><div style=\"margin-top:6px;font:12px/1 ${font};color:${c.muted};\">${label}</div></td>`;\n  const summary = `\n    <table role=\"presentation\" width=\"100%\" cellpadding=\"0\" cellspacing=\"0\" style=\"background:${c.card};border:1px solid ${c.line};border-radius:12px;\">\n      <tr>\n        ${stat(recent.length, 'new')}\n        ${stat(count.A, 'A-band', band.A.fg)}\n        ${stat(count.B, 'B-band', band.B.fg)}\n        ${stat(count.C, 'C-band', band.C.fg)}\n        ${stat(waiting.length, 'awaiting you', waiting.length ? c.warnFg : c.ink)}\n      </tr>\n    </table>`;\n\n  const html = `<!doctype html><html><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><title>${esc(agency)} digest</title></head>\n<body style=\"margin:0;padding:0;background:${c.bg};\">\n<table role=\"presentation\" width=\"100%\" cellpadding=\"0\" cellspacing=\"0\" style=\"background:${c.bg};\">\n<tr><td align=\"center\" style=\"padding:0 0 32px;\">\n<table role=\"presentation\" width=\"100%\" cellpadding=\"0\" cellspacing=\"0\" style=\"max-width:600px;\">\n  <tr><td style=\"padding:0;\"><div style=\"height:4px;background:${c.primary};border-radius:0 0 2px 2px;\"></div></td></tr>\n  <tr><td style=\"padding:22px 20px 16px;\">\n    <table role=\"presentation\" width=\"100%\" cellpadding=\"0\" cellspacing=\"0\"><tr>\n      <td style=\"font:700 15px/1 ${font};color:${c.ink};letter-spacing:-.01em;\">${esc(agency)}</td>\n      <td align=\"right\" style=\"font:13px/1 ${font};color:${c.muted};\">${esc(fmtDate)}</td>\n    </tr></table>\n    <div style=\"margin-top:18px;font:700 24px/1.2 ${font};color:${c.ink};letter-spacing:-.02em;\">Morning digest</div>\n    <div style=\"margin-top:6px;font:14px/1.5 ${font};color:${c.muted};\">${recent.length ? `${recent.length} new application${recent.length === 1 ? '' : 's'} screened in the last ${windowHours} hours.${waiting.length ? ` <span style=\"color:${c.warnFg};font-weight:600;\">${waiting.length} waiting on you.</span>` : ''}` : `Nothing new in the last ${windowHours} hours.`}</div>\n  </td></tr>\n  <tr><td style=\"padding:0 20px 16px;\">${summary}</td></tr>\n  <tr><td style=\"padding:0 20px;\">${sections}</td></tr>\n  <tr><td style=\"padding:8px 20px 0;font:12px/1.6 ${font};color:${c.faint};\">Applications are screened and filed in ${esc(atsLabel)} automatically. Nothing is sent to a candidate without your approval.<br>Run for ${esc(agency)} by OpsAutomated.</td></tr>\n</table>\n</td></tr></table></body></html>`;\n\n  const subject = recent.length\n    ? `${fmtDate}: ${recent.length} new${count.A ? `, ${count.A} A-band` : ''}${waiting.length ? `, ${waiting.length} awaiting you` : ''}`\n    : `${fmtDate}: no new applications`;\n\n  return { subject, body: text.join('\\n'), html };\n}\n\nconst cfg = $('Config').first().json;\nconst jobs = $('Get jobs').all().map(i => i.json);\nconst rows = $input.all().map(i => i.json);\nreturn [{ json: buildDigest({ jobs, rows, cfg }) }];\n"
+      }
+    },
+    {
+      "id": "169fb01b-5b2c-486a-a6cc-f9f516041384",
+      "name": "Send digest",
+      "webhookId": "00000000-0000-4000-8000-000000000004",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.2,
+      "position": [
+        1040,
+        0
+      ],
+      "parameters": {
+        "sendTo": "owner@example.com",
+        "subject": "={{ $json.subject }}",
+        "message": "={{ $json.html }}",
+        "options": {
+          "appendAttribution": false
+        }
+      },
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "CRED_GMAIL",
+          "name": "Gmail OAuth2"
+        }
+      }
+    },
+    {
+      "id": "719727c9-8e61-4d1d-94cd-d37249648aa9",
+      "name": "Config",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.5,
+      "position": [
+        160,
+        0
+      ],
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "a1",
+              "name": "agency_name",
+              "type": "string",
+              "value": "Kestrel Technical Recruitment"
+            },
+            {
+              "id": "a2",
+              "name": "brand_primary",
+              "type": "string",
+              "value": "#0ea672"
+            },
+            {
+              "id": "a3",
+              "name": "brand_ink",
+              "type": "string",
+              "value": "#111827"
+            },
+            {
+              "id": "a4",
+              "name": "ats_label",
+              "type": "string",
+              "value": "Zoho"
+            },
+            {
+              "id": "a5",
+              "name": "digest_window_hours",
+              "type": "number",
+              "value": 24
+            }
+          ]
+        },
+        "options": {}
+      }
+    }
+  ],
+  "connections": {
+    "Get jobs": {
+      "main": [
+        [
+          {
+            "node": "Get log",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get log": {
+      "main": [
+        [
+          {
+            "node": "Build digest",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build digest": {
+      "main": [
+        [
+          {
+            "node": "Send digest",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Schedule Trigger": {
+      "main": [
+        [
+          {
+            "node": "Config",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Config": {
+      "main": [
+        [
+          {
+            "node": "Get jobs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "nodeGroups": [],
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "timeSavedMode": "fixed",
+    "errorWorkflow": "WF_ERROR_ALERT",
+    "callerPolicy": "workflowsFromSameOwner",
+    "availableInMCP": true
+  },
+  "tags": []
+}

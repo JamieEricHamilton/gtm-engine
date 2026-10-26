@@ -1,0 +1,360 @@
+{
+  "id": "WF_D07_WHY_NOW",
+  "name": "AI D7 - Why-now",
+  "description": "Trigger line, discovery question, persona and proof for A/B accounts, from signal rows only.",
+  "nodes": [
+    {
+      "id": "d5f77db8-d3a3-496e-b7c5-217e17c6a719",
+      "name": "Sticky Note 74eac9a1",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        0,
+        300
+      ],
+      "parameters": {
+        "content": "## D7 - Why-now for A/B\nStructured signal rows in, Sonnet 5.5 at temperature 0 out: trigger_line (cheat-sheet format, facts only), discovery_q (picked from the product card), persona, proof (verbatim from the card), evidence_line, context. account_id echoed. An A with no usable trigger drops to B. Run after D6, before D8.",
+        "color": 4,
+        "width": 560,
+        "height": 160
+      }
+    },
+    {
+      "id": "53e7471d-8076-4c19-bef8-ae64f25a7aa2",
+      "name": "Run why-now (manual)",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        208
+      ],
+      "parameters": {}
+    },
+    {
+      "id": "8c3c6f34-5e8a-44d1-8ab2-c2924c9731f2",
+      "name": "Load A/B needing why-now",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        224,
+        208
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "https://YOUR_SUPABASE_PROJECT_REF.supabase.co/rest/v1/rpc/intel_accounts_for_why_now",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "supabaseApi",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ p_limit: 300 }) }}",
+        "options": {
+          "timeout": 120000
+        }
+      },
+      "credentials": {
+        "supabaseApi": {
+          "id": "CRED_SUPABASE",
+          "name": "Supabase (service role)"
+        }
+      },
+      "executeOnce": true
+    },
+    {
+      "id": "07547fc1-5208-49ae-9039-5699670ff753",
+      "name": "Write why-now",
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.9,
+      "position": [
+        448,
+        208
+      ],
+      "parameters": {
+        "promptType": "define",
+        "hasOutputParser": true,
+        "batching": {},
+        "text": "=You write the first ten seconds of a cold call for an SDR at the company (global employment platform: EOR, contractor management, US PEO, Field Services for on-site crews, IT equipment for devices). Return ONLY the JSON requested.\n\naccount_id: {{ $json.account_id }} (return this exact value, unchanged)\nCompany: {{ $json.name }} ({{ $json.domain || \"-\" }}), {{ $json.headcount || \"unknown\" }} staff, industry {{ $json.industry || \"unknown\" }}, HQ {{ $json.hq_country || \"unknown\" }}\nBand {{ $json.band }}, lead product: {{ $json.lead_product }}, conversation starter: {{ $json.convo_starter || \"none\" }}\nEvidence summary: {{ $json.evidence_line || \"-\" }}\nScore breakdown: {{ JSON.stringify($json.breakdown) }}\nOpen roles (last 90 days): {{ JSON.stringify($json.jobs) }}\nNews (last 9 months): {{ JSON.stringify($json.news) }}\n\nCOUNTRY RULE (applies to trigger_line and discovery_q)\n- You may name a country or city ONLY if (a) an open role in that country appears in the Open roles list above, or (b) a news item above (expansion, new office, project win, acquisition) names that place. Those are the only proof of where they are hiring next.\n- Staff already abroad, offices abroad and emp_abroad / offices_abroad in the breakdown are NOT hiring intent. Never name those countries. Describe them as \"people in a few countries\" or \"a team spread across a few places\".\n- If neither a role nor a news item gives you a place, write the discovery question without one (patterns below have a no-country form).\n\nFUNDING RULE\n- A funding item with source \"companies_house\" (title starts \"SH01 share allotment\") is a raise seen on the public register that has not been announced. It is already checked: only real money reaches you. On the call it is subtext, never the headline, and the source is never named: no \"Companies House\", no \"register\", no \"filing\", no amount.\n  - With a hiring signal (an open role, especially abroad): the role is the trigger and the round is a clause: \"I saw you're hiring in Luxembourg and it looks like you've just closed a round, that's actually why I called.\"\n  - With no hiring signal: \"It looks like you've recently closed a round, that's actually why I called.\" Keep \"it looks like\".\n- A funding item with source \"news\" is public: say it plainly with the amount if known (\"I saw you've just raised £4m\"). If both exist, use the news one.\n\nDISTRIBUTED TEAM RULE\n- Evidence containing \"DISTRIBUTED TEAM (N countries, M staff)\" or conversation starter \"distributed\" means a small company whose people sit in several countries with no real offices: almost always contractors, which is the vendor conversation itself. When it is the strongest signal (no raise in 90 days, no foreign role), the trigger line is: \"I saw you've got a team of about [M] spread across a few countries, that's actually why I called.\" Round the headcount loosely (\"about 20\"). No country names, no count of countries.\n- The discovery question is then the eor no-place staff-abroad pattern below (\"How are the people outside the UK employed at the moment...\"). Persona: founder under 50 staff.\n- \"new UK entity\" in the evidence means a foreign-headquartered company that set up a UK company recently; it may be mentioned only in context and evidence_line, never on the call.\n\nRULES FOR trigger_line\n- Format: \"I saw [specific thing], that's actually why I called.\" Under 25 words. ONE trigger, the strongest, in this order: a funding round in the last 90 days > foreign roles > distributed team / staff already abroad > expansion or project win > contract roles > US role > remote roles.\n- If the company raised money in the last 90 days AND has foreign roles, join them in one line: \"I saw you've just raised £4m and you're hiring in Lisbon, that's actually why I called.\"\n- Staff already abroad as the trigger: \"I saw you've got people in a few countries already, that's actually why I called.\" No country names.\n- Only facts present above. Numbers, role titles, amounts (press only) and place names (subject to the country rule) are allowed; adjectives like fast-growing, exciting, impressive are not. Never mention the vendor in the trigger line.\n- Signals older than 45 days are \"recently\", never \"this week\". If no fact above can carry a trigger line, return trigger_line as an empty string.\n\nRULES FOR discovery_q\nThis is the ONE opening question after the trigger line. Tone: a mate helping a mate think through a complicated problem. Plain spoken, no jargon, no sales language, nothing the prospect could feel tested by. Answerable in one breath with a fact they already know, and either answer tells the SDR which conversation to have. The SDR is trained on the follow-ups, so do not add them. Under 25 words. British English.\nUse the pattern for the lead product. Fill in [country] only under the country rule; otherwise use the no-country form. Keep the shape.\n- eor, with a place from a role or news: \"Is [country] going to be your first hire there, or have you done it before?\"\n- eor, no place but raised recently (press or register): \"Where's the first hire going to be with the new money, is any of it outside the UK?\"\n- eor, no place, staff already abroad or distributed team: \"How are the people outside the UK employed at the moment, own entity, contractors, or something in between?\"\n- contractors, with a place: \"Are your contractors in [country] invoicing you direct, or do you run them through a platform?\" No place: \"Are your contractors abroad invoicing you direct, or do you run them through a platform?\"\n- contractors, agencies (evidence starts with \"agency\"): \"When you place a contractor in [country], who holds the contract and runs the payments, you or the client?\" No place: \"When you place a contractor abroad, who holds the contract and runs the payments, you or the client?\"\n- us_peo: \"Have you got a US entity already, and if so is payroll and benefits set up there yet?\"\n- field_services: \"When you win a project somewhere you've no entity, how do you get the crew on the ground legally?\"\n- it_equipment, with a place: \"How are you getting a laptop out to someone in [country], set up and secure, and back again when they leave?\" No place: \"How are you getting laptops out to people abroad, set up and secure, and back again when they leave?\"\n- If the conversation starter is immigration AND the lead product is eor: \"Anyone you're trying to move across borders at the moment, and who's tracking the visa dates?\"\n\npersona: one of founder, hr, finance, ops. founder when under ~30 staff and no People/HR role appears in the roles, and always for a company that raised in the last 90 days with under 50 staff, and for a distributed team under 50 staff; hr when a People/HR/Talent role appears or the company is 30+ staff with an EOR lead; finance when lead is contractors; ops when lead is field_services or it_equipment.\n\nproof: choose ONE verbatim by fit, or an empty string if none fits.\n- \"Customer A, scaled from 1 to 38 people across 7 countries with no in-house HR, 50+ contractors on one platform.\" (founder, contractor-heavy, small, distributed team)\n- \"Customer B, a SaaS scale-up that hired 50+ people across 14 countries through the vendor.\" (tech / SaaS hiring abroad)\n- \"Customer C, a UK fintech, hired 100 people they couldn't have otherwise and grew headcount 20% in a year.\" (fintech / scaling)\n- \"Customer D, cut contractor onboarding to a single day and saves up to $140k a year.\" (finance / contractor ops)\n- \"Customer E, got a full day a week of HR admin back and halved onboarding time.\" (HR / People lead)\n- \"Customer F, scaled hiring across five countries in weeks, not months.\" (ops / speed)\n- \"[vendor headline statistic].\" (anything else)\n\nevidence_line: one line, under 20 words, the facts behind the trigger, for the SDR's eyes only: for a register raise write \"SH01 on register, unannounced\" plus the amount if given; for a distributed team write \"team in N countries, M staff\" with the countries; roles, countries (any country may appear here), dates, headcount. No adjectives.\ncontext: two sentences for the account executive's email sequence: what the signals add up to and which product conversation it is. May mention the vendor."
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "id": "2d6aca3d-0c16-4cb4-a975-57bde9296763",
+      "name": "Sonnet 5.5",
+      "type": "@n8n/n8n-nodes-langchain.lmChatAnthropic",
+      "typeVersion": 1.6,
+      "position": [
+        464,
+        432
+      ],
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "value": "claude-sonnet-5-5",
+          "mode": "list",
+          "cachedResultName": "Claude Sonnet 5.5"
+        },
+        "options": {
+          "temperature": 0
+        }
+      },
+      "credentials": {
+        "anthropicApi": {
+          "id": "CRED_ANTHROPIC",
+          "name": "Anthropic API"
+        }
+      }
+    },
+    {
+      "id": "0ec61f78-2a2a-49f8-9421-af42819c722e",
+      "name": "Why-now schema",
+      "type": "@n8n/n8n-nodes-langchain.outputParserStructured",
+      "typeVersion": 1.3,
+      "position": [
+        592,
+        432
+      ],
+      "parameters": {
+        "jsonSchemaExample": "{\"account_id\":\"00000000-0000-0000-0000-000000000000\",\"trigger_line\":\"I saw you have two engineering roles open in Lisbon, that is actually why I called.\",\"discovery_q\":\"When you found those hires in Portugal, what was the plan for employing them, and what happens to the role if it takes four months to sort?\",\"persona\":\"founder\",\"proof\":\"Customer B, hired 50+ people across 14 countries through the vendor.\",\"evidence_line\":\"2 roles Lisbon, posted 28 Sep · 38 staff · Software\",\"context\":\"UK entity only, first foreign roles live since late September. Classic first international hire.\"}",
+        "autoFix": true
+      }
+    },
+    {
+      "id": "2e096881-cfb2-4c24-b112-718bd854ccfa",
+      "name": "Sonnet 5.5 (autofix)",
+      "type": "@n8n/n8n-nodes-langchain.lmChatAnthropic",
+      "typeVersion": 1.6,
+      "position": [
+        592,
+        640
+      ],
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "value": "claude-sonnet-5-5",
+          "mode": "list",
+          "cachedResultName": "Claude Sonnet 5.5"
+        },
+        "options": {
+          "temperature": 0
+        }
+      },
+      "credentials": {
+        "anthropicApi": {
+          "id": "CRED_ANTHROPIC",
+          "name": "Anthropic API"
+        }
+      }
+    },
+    {
+      "id": "bfbefd10-80fe-4776-a98f-50c725bb0e95",
+      "name": "Save why-now (Supabase RPC)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        800,
+        208
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "https://YOUR_SUPABASE_PROJECT_REF.supabase.co/rest/v1/rpc/intel_save_why_now",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "supabaseApi",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ p_account_id: $json.output.account_id, p_trigger_line: String($json.output.trigger_line || \"\").split(/\\s+/).slice(0, 30).join(\" \"), p_discovery_q: $json.output.discovery_q || \"\", p_persona: $json.output.persona || \"\", p_proof: $json.output.proof || \"\", p_evidence_line: $json.output.evidence_line || \"\", p_context: $json.output.context || \"\", p_model: \"claude-sonnet-5-5\" }) }}",
+        "options": {
+          "batching": {
+            "batch": {
+              "batchSize": 5,
+              "batchInterval": 250
+            }
+          }
+        }
+      },
+      "credentials": {
+        "supabaseApi": {
+          "id": "CRED_SUPABASE",
+          "name": "Supabase (service role)"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "27eef562-5579-46c4-862b-e55fd0213c89",
+      "name": "Daily 06:40",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.4,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "daysInterval": 1,
+              "field": "days",
+              "triggerAtHour": 6,
+              "triggerAtMinute": 40
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "625c9efe-3f95-426d-b6a0-fb633c061740",
+      "name": "Any model failures?",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        672,
+        420
+      ],
+      "parameters": {
+        "jsCode": "// Error output of the LLM chain. If every account failed, the API is down or out of credit: raise a real error so M1 fires the watchdog.\nconst items = $input.all();\nif (!items.length) return [];\nconst first = items[0].json || {};\nconst msg = String(first.error || 'model call failed');\nreturn [{ json: { failed: items.length, message: msg } }];",
+        "mode": "runOnceForAllItems"
+      }
+    },
+    {
+      "id": "734f21c6-5605-43ea-a50e-35800070f92e",
+      "name": "Stop: model calls failing",
+      "type": "n8n-nodes-base.stopAndError",
+      "typeVersion": 1,
+      "position": [
+        896,
+        420
+      ],
+      "parameters": {
+        "errorMessage": "=D7 why-now: {{ $json.failed }} model call(s) failed. First error: {{ $json.message }}. If this says credit balance, Jamie needs to top up the Anthropic API at console.anthropic.com (Plans & Billing)."
+      }
+    },
+    {
+      "id": "5c67f75e-e48c-465a-a244-be1655f87736",
+      "name": "Called by another workflow",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        0,
+        420
+      ],
+      "parameters": {
+        "inputSource": "passthrough"
+      }
+    }
+  ],
+  "connections": {
+    "Run why-now (manual)": {
+      "main": [
+        [
+          {
+            "node": "Load A/B needing why-now",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Load A/B needing why-now": {
+      "main": [
+        [
+          {
+            "node": "Write why-now",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Write why-now": {
+      "main": [
+        [
+          {
+            "node": "Save why-now (Supabase RPC)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Any model failures?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Sonnet 5.5": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Write why-now",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Why-now schema": {
+      "ai_outputParser": [
+        [
+          {
+            "node": "Write why-now",
+            "type": "ai_outputParser",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Sonnet 5.5 (autofix)": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Why-now schema",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Daily 06:40": {
+      "main": [
+        [
+          {
+            "node": "Load A/B needing why-now",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Any model failures?": {
+      "main": [
+        [
+          {
+            "node": "Stop: model calls failing",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Called by another workflow": {
+      "main": [
+        [
+          {
+            "node": "Load A/B needing why-now",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "nodeGroups": [],
+  "settings": {
+    "executionOrder": "v1",
+    "availableInMCP": true,
+    "errorWorkflow": "WF_ERROR_ALERT",
+    "timezone": "Europe/London"
+  },
+  "tags": []
+}

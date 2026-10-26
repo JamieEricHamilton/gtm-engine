@@ -1,0 +1,168 @@
+{
+  "id": "WF_ERROR_ALERT",
+  "name": "M1 - Error alert",
+  "description": null,
+  "nodes": [
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.errorTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        0
+      ],
+      "id": "12a04c23-c700-4b14-b3cc-115942633aa5",
+      "name": "Error Trigger"
+    },
+    {
+      "parameters": {
+        "sendTo": "owner@example.com",
+        "subject": "={{ $json.workflow.name }}",
+        "emailType": "text",
+        "message": "=Failed node: {{ $json.execution.lastNodeExecuted }} - Error: {{ $json.execution.error.message }} - {{ $json.execution.url }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.2,
+      "position": [
+        470,
+        120
+      ],
+      "id": "050d8410-7a4c-4dc5-823b-14cbc8e2beb3",
+      "name": "Send a message",
+      "webhookId": "00000000-0000-4000-8000-000000000017",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "CRED_GMAIL",
+          "name": "Gmail OAuth2"
+        }
+      }
+    },
+    {
+      "id": "ee61772e-b26f-484a-8644-311b93826fd2",
+      "name": "Account-intel workflow?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        224,
+        0
+      ],
+      "parameters": {
+        "conditions": {
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "c1",
+              "leftValue": "={{ $json.workflow.name }}",
+              "operator": {
+                "operation": "startsWith",
+                "type": "string"
+              },
+              "rightValue": "AI "
+            }
+          ],
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          }
+        }
+      }
+    },
+    {
+      "id": "f802bc61-adf0-4dc1-9109-0d354751fee3",
+      "name": "Fire Claude watchdog",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        470,
+        -100
+      ],
+      "parameters": {
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "anthropic-beta",
+              "value": "experimental-cc-routine-2026-04-01"
+            },
+            {
+              "name": "anthropic-version",
+              "value": "2023-06-01"
+            }
+          ]
+        },
+        "jsonBody": "={{ JSON.stringify({ text: 'n8n workflow failed: ' + $json.workflow.name + ' (id ' + $json.workflow.id + '). Failed node: ' + $json.execution.lastNodeExecuted + '. Error: ' + $json.execution.error.message + '. Execution: ' + $json.execution.url }) }}",
+        "method": "POST",
+        "options": {
+          "timeout": 30000
+        },
+        "sendBody": true,
+        "sendHeaders": true,
+        "specifyBody": "json",
+        "url": "https://api.anthropic.com/v1/claude_code/routines/ROUTINE_ID/fire"
+      },
+      "onError": "continueErrorOutput",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "CRED_WATCHDOG",
+          "name": "Watchdog routine token (header auth)"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Error Trigger": {
+      "main": [
+        [
+          {
+            "node": "Account-intel workflow?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Account-intel workflow?": {
+      "main": [
+        [
+          {
+            "node": "Fire Claude watchdog",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Send a message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fire Claude watchdog": {
+      "main": [
+        null,
+        [
+          {
+            "node": "Send a message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "nodeGroups": [],
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "timeSavedMode": "fixed",
+    "errorWorkflow": "WF_ERROR_ALERT",
+    "callerPolicy": "workflowsFromSameOwner",
+    "availableInMCP": true
+  },
+  "tags": []
+}

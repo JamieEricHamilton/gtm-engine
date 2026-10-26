@@ -1,0 +1,293 @@
+{
+  "id": "WF_HOURLY_APPLY_AND_HEALTH",
+  "name": "AI M2 - Hourly apply and health",
+  "description": "Hourly: apply landed LinkedIn/jobs rows, rescore if anything applied, write a health report with issues. Read by the Claude watchdog task; no email.",
+  "nodes": [
+    {
+      "id": "b4e32d67-165c-46f1-bcb7-a94289b3c655",
+      "name": "Every hour at :20",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.3,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "hours",
+              "hoursInterval": 1,
+              "triggerAtMinute": 20
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "25255694-e22c-4eff-b5c4-dbc8a62c67dd",
+      "name": "Apply + health (Supabase RPC)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        224,
+        0
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "https://YOUR_SUPABASE_PROJECT_REF.supabase.co/rest/v1/rpc/intel_health",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "supabaseApi",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({}) }}",
+        "options": {
+          "timeout": 300000
+        }
+      },
+      "credentials": {
+        "supabaseApi": {
+          "id": "CRED_SUPABASE",
+          "name": "Supabase (service role)"
+        }
+      },
+      "executeOnce": true
+    },
+    {
+      "id": "aa3d3fd0-f30d-4c7d-aa2d-9e9eaeb47e18",
+      "name": "Health summary",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        448,
+        0
+      ],
+      "parameters": {
+        "mode": "manual",
+        "includeOtherFields": true,
+        "assignments": {
+          "assignments": [
+            {
+              "id": "issues-count",
+              "name": "issue_count",
+              "value": "={{ ($json.issues || []).length }}",
+              "type": "number"
+            },
+            {
+              "id": "summary",
+              "name": "summary",
+              "value": "={{ \"A \" + $json.bands.A + \" / B \" + $json.bands.B + \" / C \" + $json.bands.C + \" · issues: \" + (($json.issues || []).join(\"; \") || \"none\") }}",
+              "type": "string"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "2dfe8d5e-35cf-42a6-90af-23e90b9ab21b",
+      "name": "Any issues?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        700,
+        0
+      ],
+      "parameters": {
+        "conditions": {
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "c1",
+              "leftValue": "={{ $json.issue_count }}",
+              "operator": {
+                "operation": "gt",
+                "type": "number"
+              },
+              "rightValue": 0
+            }
+          ],
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          }
+        }
+      }
+    },
+    {
+      "id": "32d8416e-7f7f-4b5f-81c4-8fb5026745c5",
+      "name": "Fire Claude watchdog",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        950,
+        -100
+      ],
+      "parameters": {
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "anthropic-beta",
+              "value": "experimental-cc-routine-2026-04-01"
+            },
+            {
+              "name": "anthropic-version",
+              "value": "2023-06-01"
+            }
+          ]
+        },
+        "jsonBody": "={{ JSON.stringify({ text: 'Hourly health check (the vendor M2) found issues at ' + $now.toISO() + '. ' + $json.summary + ' Full report: ' + JSON.stringify({ queues: $json.queues, bands: $json.bands, applied_now: $json.applied_now }) }) }}",
+        "method": "POST",
+        "options": {
+          "timeout": 30000
+        },
+        "sendBody": true,
+        "sendHeaders": true,
+        "specifyBody": "json",
+        "url": "https://api.anthropic.com/v1/claude_code/routines/ROUTINE_ID/fire"
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "CRED_WATCHDOG",
+          "name": "Watchdog routine token (header auth)"
+        }
+      }
+    },
+    {
+      "id": "23008ec6-a10e-4b4b-af0f-7d1f04dec17d",
+      "name": "Apify limits",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        224,
+        200
+      ],
+      "parameters": {
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "method": "GET",
+        "options": {
+          "timeout": 30000
+        },
+        "url": "https://api.apify.com/v2/users/me/limits"
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "CRED_APIFY",
+          "name": "Apify (header auth)"
+        }
+      },
+      "onError": "continueRegularOutput",
+      "alwaysOutputData": true
+    },
+    {
+      "id": "5e31df6f-2b2e-4a12-9129-0ad3b17db79c",
+      "name": "Save Apify usage (Supabase RPC)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        448,
+        200
+      ],
+      "parameters": {
+        "authentication": "predefinedCredentialType",
+        "jsonBody": "={{ JSON.stringify({ p_key: 'apify_usage', p_value: JSON.stringify({ used_usd: $json.data?.current?.monthlyUsageUsd ?? null, limit_usd: $json.data?.limits?.maxMonthlyUsageUsd ?? null, cycle_end: $json.data?.monthlyUsageCycle?.endAt ?? null, checked_at: $now.toISO() }) }) }}",
+        "method": "POST",
+        "nodeCredentialType": "supabaseApi",
+        "options": {
+          "timeout": 30000
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "url": "https://YOUR_SUPABASE_PROJECT_REF.supabase.co/rest/v1/rpc/intel_set_setting"
+      },
+      "credentials": {
+        "supabaseApi": {
+          "id": "CRED_SUPABASE",
+          "name": "Supabase (service role)"
+        }
+      },
+      "onError": "continueRegularOutput",
+      "alwaysOutputData": true
+    }
+  ],
+  "connections": {
+    "Apply + health (Supabase RPC)": {
+      "main": [
+        [
+          {
+            "node": "Health summary",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Health summary": {
+      "main": [
+        [
+          {
+            "node": "Any issues?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Any issues?": {
+      "main": [
+        [
+          {
+            "node": "Fire Claude watchdog",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Every hour at :20": {
+      "main": [
+        [
+          {
+            "node": "Apify limits",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Apify limits": {
+      "main": [
+        [
+          {
+            "node": "Save Apify usage (Supabase RPC)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save Apify usage (Supabase RPC)": {
+      "main": [
+        [
+          {
+            "node": "Apply + health (Supabase RPC)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "nodeGroups": [],
+  "settings": {
+    "executionOrder": "v1",
+    "availableInMCP": true,
+    "errorWorkflow": "WF_ERROR_ALERT",
+    "timezone": "Europe/London",
+    "saveDataSuccessExecution": "all"
+  },
+  "tags": []
+}

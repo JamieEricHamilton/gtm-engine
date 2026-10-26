@@ -1,0 +1,774 @@
+{
+  "id": "WF_D15_CONTACT_REQUESTS",
+  "name": "AI D15 - Contact requests",
+  "description": "Contract with the CRM-side agent: tab \"Contact requests\" on the SDR's sheet. It writes A-D; D15 fills E-T every 15 min (status, headcount, open roles, up to 4 buyer contacts by headcount band via Apify harvestapi company-employees, pulled at). Book accounts onl",
+  "nodes": [
+    {
+      "id": "4bfc84a6-2026-48f7-8cb3-2ab5796148eb",
+      "name": "Every 15 min",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.4,
+      "position": [
+        448,
+        192
+      ],
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 15
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "3eab2c75-d459-4c73-8105-f57d3748918a",
+      "name": "Read requests tab",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        672,
+        96
+      ],
+      "parameters": {
+        "resource": "sheet",
+        "operation": "read",
+        "documentId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "SHEET_ID_SDR_CALL_LIST"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "Contact requests"
+        },
+        "filtersUI": {},
+        "options": {
+          "dataLocationOnSheet": {
+            "values": {
+              "rangeDefinition": "detectAutomatically"
+            }
+          }
+        }
+      },
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "CRED_GSHEETS_2",
+          "name": "Google Sheets OAuth2 (second account)"
+        }
+      },
+      "executeOnce": true
+    },
+    {
+      "id": "9759ad40-6f83-4707-8605-6e481cb17be4",
+      "name": "New requests",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        896,
+        96
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// Rows the CRM-side agent has written (Company present) that D15 has not touched yet (Status empty).\nconst rows = $input.all().map(i => i.json).filter(r => r && r.row_number && String(r.Company || '').trim() && !String(r.Status || '').trim());\nif (!rows.length) return [];\nreturn [{ json: { rows: rows.map(r => ({ sheet_row: Number(r.row_number), company: String(r.Company).trim(), domain: String(r.Domain || '').trim(), page: String(r['Page visited'] || '').trim(), country: String(r['Country of interest'] || '').trim() })) } }];"
+      }
+    },
+    {
+      "id": "875bd115-5d27-4a79-acdb-516b60d141cb",
+      "name": "Upsert requests (Supabase RPC)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        1120,
+        96
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "https://YOUR_SUPABASE_PROJECT_REF.supabase.co/rest/v1/rpc/intel_upsert_contact_requests",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "supabaseApi",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ p_rows: $json.rows }) }}",
+        "options": {
+          "timeout": 60000,
+          "response": {
+            "response": {
+              "responseFormat": "text",
+              "outputPropertyName": "body"
+            }
+          }
+        }
+      },
+      "credentials": {
+        "supabaseApi": {
+          "id": "CRED_SUPABASE",
+          "name": "Supabase (service role)"
+        }
+      },
+      "executeOnce": true
+    },
+    {
+      "id": "0658382a-43bd-409c-ac24-3cd7ed6aba9e",
+      "name": "Claim requests (Supabase RPC)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        1344,
+        96
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "https://YOUR_SUPABASE_PROJECT_REF.supabase.co/rest/v1/rpc/intel_contact_requests_claim",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "supabaseApi",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "{\"p_limit\": 30}",
+        "options": {
+          "timeout": 60000
+        }
+      },
+      "credentials": {
+        "supabaseApi": {
+          "id": "CRED_SUPABASE",
+          "name": "Supabase (service role)"
+        }
+      },
+      "executeOnce": true
+    },
+    {
+      "id": "35e6819b-72b9-4236-a643-538b2c595a2e",
+      "name": "Has LinkedIn page?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1568,
+        96
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.status }}",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              },
+              "rightValue": "pending"
+            }
+          ],
+          "combinator": "and"
+        }
+      }
+    },
+    {
+      "id": "2ffc93fe-52ca-4a0b-8b6d-018ef374cb99",
+      "name": "Apify company employees",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        1792,
+        32
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.apify.com/v2/acts/harvestapi~linkedin-company-employees/run-sync-get-dataset-items",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ companies: [String($json.linkedin_url).replace(/\\/(about|jobs|posts|people)\\/?$/, \"\")], profileScraperMode: \"Full ($8 per 1k)\", seniorityLevelIds: [\"210\",\"220\",\"300\",\"310\",\"320\"], maxItems: 15, companyBatchMode: \"all_at_once\" }) }}",
+        "options": {
+          "timeout": 300000,
+          "batching": {
+            "batch": {
+              "batchSize": 2,
+              "batchInterval": 500
+            }
+          },
+          "response": {
+            "response": {
+              "responseFormat": "text",
+              "outputPropertyName": "body"
+            }
+          }
+        }
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "CRED_APIFY",
+          "name": "Apify (header auth)"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "cf71f227-587d-4328-8cc3-1c7c06ce3d40",
+      "name": "Rank contacts",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2016,
+        32
+      ],
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// Pick up to 4 buyers by headcount band. Rank 1 = first choice, 2 = second choice, 3 = other senior titles (Chief of Staff etc).\nconst req = $('Claim requests (Supabase RPC)').item.json;\nlet rows = [], err = null;\nif ($json.error) err = typeof $json.error === 'string' ? $json.error : JSON.stringify($json.error).slice(0, 500);\nelse { try { const p = JSON.parse(String($json.body || '[]')); rows = Array.isArray(p) ? p : (p.items || []); if (!Array.isArray(p) && !p.items) err = String($json.body).slice(0, 500); } catch (e) { err = 'unparseable: ' + String($json.body).slice(0, 300); } }\nconst hc = Number(req.headcount) || 0;\nconst founder = /founder|\\bceo\\b|chief executive|managing director|\\bmd\\b|\\bowner\\b/i;\nconst bands = {\n  small: [[founder], [/\\bcoo\\b|chief operating|head of operations|operations director|director of operations/i]],\n  mid: [[/head of people|people ops|people operations|\\bhr manager\\b|hr business partner|head of hr|chief people|people director|hr director/i], [/\\bcoo\\b|chief operating|head of operations|operations director|finance director|\\bcfo\\b|chief financial|head of finance/i, founder]],\n  large: [[/hr director|head of people|chief people|vp people|people director|director of people|head of hr|chief human/i], [/talent acquisition|head of talent|finance director|\\bcfo\\b|head of finance|payroll/i]]\n};\n// Loosely attached people LinkedIn returns under a company filter: never real buyers.\nconst junk = /freelanc|self.?employed|independent|^consultant$|^associate$|^contractor$|advis[eo]r$|^student|intern\\b|^retired/i;\nconst band = hc && hc < 50 ? 'small' : (hc && hc <= 200 ? 'mid' : (hc ? 'large' : 'small'));\nconst slug = String(req.linkedin_url || '').replace(/\\/$/, '').split('/').pop().toLowerCase();\nconst titleOf = p => {\n  const cur = (p.experience || []).find(e => e && e.endDate && /present/i.test(String(e.endDate.text || '')) && (!slug || String(e.companyUniversalName || '').toLowerCase() === slug || String(e.companyLinkedinUrl || '').toLowerCase().includes('/company/' + slug)));\n  if (cur && cur.position) return String(cur.position).trim();\n  const anyCur = (p.experience || []).find(e => e && e.endDate && /present/i.test(String(e.endDate.text || '')));\n  if (anyCur && anyCur.position) return String(anyCur.position).trim();\n  return String(p.headline || '').split(/\\s[|@]\\s| at /)[0].trim();\n};\nconst scored = rows.filter(p => p && p.linkedinUrl).map(p => {\n  const title = titleOf(p);\n  const [first, second] = bands[band];\n  let r = first.some(x => x.test(title)) ? 1 : (second.some(x => x.test(title)) ? 2 : 3);\n  if (r === 3 && junk.test(title)) r = 9;\n  return { full_name: [p.firstName, p.lastName].filter(Boolean).join(' ').trim(), title, headline: String(p.headline || '').slice(0, 300), linkedin_url: p.linkedinUrl, location: (p.location && (p.location.linkedinText || p.location.text)) || '', rank: String(r) };\n}).filter(c => c.rank !== '9').sort((a, b) => Number(a.rank) - Number(b.rank));\nreturn { json: { request_id: req.request_id, items: scored.slice(0, 4), found: rows.length, error: err } };"
+      }
+    },
+    {
+      "id": "48d95043-286e-4967-8996-c3aa6836a351",
+      "name": "Save contacts (Supabase RPC)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        2240,
+        32
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "https://YOUR_SUPABASE_PROJECT_REF.supabase.co/rest/v1/rpc/intel_save_contacts",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "supabaseApi",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ p_request_id: $json.request_id, p_items: $json.items, p_error: $json.error }) }}",
+        "options": {
+          "timeout": 60000
+        }
+      },
+      "credentials": {
+        "supabaseApi": {
+          "id": "CRED_SUPABASE",
+          "name": "Supabase (service role)"
+        }
+      }
+    },
+    {
+      "id": "55c083cf-350b-41fb-8d4b-747e412ad763",
+      "name": "Build row values",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2464,
+        96
+      ],
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// Works for both inputs: a claimed row with no scrape (no_match / no_linkedin) and the save result (found / none_found / error).\nconst j = $json;\nconst labels = { found: 'Found', none_found: 'No senior profiles found', no_linkedin: 'No LinkedIn page on file', no_match: 'Not in the book - check the domain', error: 'Scrape failed, will retry' };\nconst contacts = Array.isArray(j.contacts) ? j.contacts : [];\nconst cells = [labels[j.status] || j.status, j.headcount || '', j.open_roles || ''];\nfor (let i = 0; i < 4; i++) { const c = contacts[i]; cells.push(c ? c.name : ''); cells.push(c ? (c.title || '') : ''); cells.push(c ? c.url : ''); }\ncells.push(new Date().toISOString().slice(0, 16).replace('T', ' '));\nreturn { json: { range: 'Contact requests!E' + j.sheet_row + ':T' + j.sheet_row, values: [cells] } };"
+      }
+    },
+    {
+      "id": "c3f44fde-fed4-4b1e-af1d-c911465c303a",
+      "name": "Write row to sheet",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        2688,
+        96
+      ],
+      "parameters": {
+        "method": "PUT",
+        "url": "={{ \"https://sheets.googleapis.com/v4/spreadsheets/SHEET_ID_SDR_CALL_LIST/values/\" + encodeURIComponent($json.range) }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "googleSheetsOAuth2Api",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "valueInputOption",
+              "value": "RAW"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ values: $json.values }) }}",
+        "options": {
+          "timeout": 60000,
+          "batching": {
+            "batch": {
+              "batchSize": 1,
+              "batchInterval": 300
+            }
+          }
+        }
+      },
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "CRED_GSHEETS_2",
+          "name": "Google Sheets OAuth2 (second account)"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "b0254c8d-49e9-4d51-9d10-91451f607164",
+      "name": "Run now (manual, also sets up the tab)",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {}
+    },
+    {
+      "id": "e2c1cf37-c71c-472b-b836-f03d5e140ecd",
+      "name": "Create tab if missing",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        224,
+        0
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "https://sheets.googleapis.com/v4/spreadsheets/SHEET_ID_SDR_CALL_LIST:batchUpdate",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "googleSheetsOAuth2Api",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "{\"requests\":[{\"addSheet\":{\"properties\":{\"title\":\"Contact requests\",\"gridProperties\":{\"frozenRowCount\":1}}}}]}",
+        "options": {}
+      },
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "CRED_GSHEETS_2",
+          "name": "Google Sheets OAuth2 (second account)"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "98052d59-d69a-41e5-b687-cc5cda2c2216",
+      "name": "Write headers",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        448,
+        0
+      ],
+      "parameters": {
+        "method": "PUT",
+        "url": "https://sheets.googleapis.com/v4/spreadsheets/SHEET_ID_SDR_CALL_LIST/values/Contact%20requests!A1:T1",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "googleSheetsOAuth2Api",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "valueInputOption",
+              "value": "RAW"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "{\"values\":[[\"Company\",\"Domain\",\"Page visited\",\"Country of interest\",\"Status\",\"Headcount\",\"Open roles\",\"Name 1\",\"Title 1\",\"LinkedIn 1\",\"Name 2\",\"Title 2\",\"LinkedIn 2\",\"Name 3\",\"Title 3\",\"LinkedIn 3\",\"Name 4\",\"Title 4\",\"LinkedIn 4\",\"Pulled at\"]]}",
+        "options": {}
+      },
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "CRED_GSHEETS_2",
+          "name": "Google Sheets OAuth2 (second account)"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "17af4849-0eda-4408-b4bc-65e85bf31bc7",
+      "name": "Apify balance (manual check)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        224,
+        -200
+      ],
+      "parameters": {
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "method": "GET",
+        "options": {},
+        "url": "https://api.apify.com/v2/users/me/limits"
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "CRED_APIFY",
+          "name": "Apify (header auth)"
+        }
+      }
+    },
+    {
+      "id": "a880f5d0-d540-4125-828d-6ac837cf3053",
+      "name": "A/B accounts needing contacts (Supabase RPC)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        672,
+        300
+      ],
+      "parameters": {
+        "authentication": "predefinedCredentialType",
+        "jsonBody": "{\"p_limit\": 20}",
+        "method": "POST",
+        "nodeCredentialType": "supabaseApi",
+        "options": {
+          "timeout": 60000
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "url": "https://YOUR_SUPABASE_PROJECT_REF.supabase.co/rest/v1/rpc/intel_band_accounts_for_contacts"
+      },
+      "credentials": {
+        "supabaseApi": {
+          "id": "CRED_SUPABASE",
+          "name": "Supabase (service role)"
+        }
+      },
+      "executeOnce": true,
+      "alwaysOutputData": true
+    },
+    {
+      "id": "c1d0a450-0813-4be6-9faf-a24d251f3eed",
+      "name": "Append A/B rows to tab",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        896,
+        300
+      ],
+      "parameters": {
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "matchingColumns": [],
+          "schema": [],
+          "value": {}
+        },
+        "documentId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "SHEET_ID_SDR_CALL_LIST"
+        },
+        "operation": "append",
+        "options": {
+          "cellFormat": "RAW",
+          "handlingExtraData": "ignoreIt"
+        },
+        "resource": "sheet",
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "Contact requests"
+        }
+      },
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "CRED_GSHEETS_2",
+          "name": "Google Sheets OAuth2 (second account)"
+        }
+      },
+      "onError": "continueRegularOutput",
+      "alwaysOutputData": true
+    },
+    {
+      "id": "f8308f8a-ebbd-450f-996d-e54d894d9348",
+      "name": "Then read",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        1120,
+        300
+      ],
+      "parameters": {},
+      "alwaysOutputData": true,
+      "executeOnce": true
+    },
+    {
+      "id": "60f142f9-854d-4a43-a132-362c15a2f911",
+      "name": "Reassert headers",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        672,
+        450
+      ],
+      "parameters": {
+        "authentication": "predefinedCredentialType",
+        "jsonBody": "{\"values\":[[\"Company\",\"Domain\",\"Page visited\",\"Country of interest\",\"Status\",\"Headcount\",\"Open roles\",\"Name 1\",\"Title 1\",\"LinkedIn 1\",\"Name 2\",\"Title 2\",\"LinkedIn 2\",\"Name 3\",\"Title 3\",\"LinkedIn 3\",\"Name 4\",\"Title 4\",\"LinkedIn 4\",\"Pulled at\"]]}",
+        "method": "PUT",
+        "nodeCredentialType": "googleSheetsOAuth2Api",
+        "options": {
+          "timeout": 30000
+        },
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "valueInputOption",
+              "value": "RAW"
+            }
+          ]
+        },
+        "sendBody": true,
+        "sendQuery": true,
+        "specifyBody": "json",
+        "url": "https://sheets.googleapis.com/v4/spreadsheets/SHEET_ID_SDR_CALL_LIST/values/Contact%20requests!A1:T1"
+      },
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "CRED_GSHEETS_2",
+          "name": "Google Sheets OAuth2 (second account)"
+        }
+      },
+      "notes": "Header row is rewritten every run because another writer (the CRM-side agent) overwrote A1 on 22 Oct and silently broke both feeders for 20 hours.",
+      "onError": "continueRegularOutput",
+      "alwaysOutputData": true,
+      "executeOnce": true
+    },
+    {
+      "id": "76c74ad8-1a29-4919-a6ca-1e60fcc28abc",
+      "name": "Shape tab row",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        780,
+        300
+      ],
+      "parameters": {
+        "jsCode": "return { json: { 'Company': $json.company, 'Domain': $json.domain || '', 'Page visited': 'Tier ' + $json.band + ' (auto)', 'Country of interest': '' } };",
+        "mode": "runOnceForEachItem"
+      }
+    }
+  ],
+  "connections": {
+    "Read requests tab": {
+      "main": [
+        [
+          {
+            "node": "New requests",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "New requests": {
+      "main": [
+        [
+          {
+            "node": "Upsert requests (Supabase RPC)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Upsert requests (Supabase RPC)": {
+      "main": [
+        [
+          {
+            "node": "Claim requests (Supabase RPC)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Claim requests (Supabase RPC)": {
+      "main": [
+        [
+          {
+            "node": "Has LinkedIn page?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Has LinkedIn page?": {
+      "main": [
+        [
+          {
+            "node": "Apify company employees",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Build row values",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Apify company employees": {
+      "main": [
+        [
+          {
+            "node": "Rank contacts",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Rank contacts": {
+      "main": [
+        [
+          {
+            "node": "Save contacts (Supabase RPC)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save contacts (Supabase RPC)": {
+      "main": [
+        [
+          {
+            "node": "Build row values",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build row values": {
+      "main": [
+        [
+          {
+            "node": "Write row to sheet",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Run now (manual, also sets up the tab)": {
+      "main": [
+        [
+          {
+            "node": "Create tab if missing",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Apify balance (manual check)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create tab if missing": {
+      "main": [
+        [
+          {
+            "node": "Write headers",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Write headers": {
+      "main": [
+        [
+          {
+            "node": "A/B accounts needing contacts (Supabase RPC)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Append A/B rows to tab": {
+      "main": [
+        [
+          {
+            "node": "Then read",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Then read": {
+      "main": [
+        [
+          {
+            "node": "Read requests tab",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Every 15 min": {
+      "main": [
+        [
+          {
+            "node": "Reassert headers",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Reassert headers": {
+      "main": [
+        [
+          {
+            "node": "A/B accounts needing contacts (Supabase RPC)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "A/B accounts needing contacts (Supabase RPC)": {
+      "main": [
+        [
+          {
+            "node": "Shape tab row",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Shape tab row": {
+      "main": [
+        [
+          {
+            "node": "Append A/B rows to tab",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "nodeGroups": [],
+  "settings": {
+    "executionOrder": "v1",
+    "availableInMCP": true,
+    "errorWorkflow": "WF_ERROR_ALERT",
+    "timezone": "Europe/London",
+    "saveDataSuccessExecution": "none",
+    "executionTimeout": 900
+  },
+  "tags": []
+}

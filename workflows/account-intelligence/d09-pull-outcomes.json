@@ -1,0 +1,189 @@
+{
+  "id": "WF_D09_PULL_OUTCOMES",
+  "name": "AI D9 - Pull outcomes",
+  "description": "Daily: read the SDR's Status and Notes from the sheet into account_intel.outcomes.",
+  "nodes": [
+    {
+      "id": "30007db1-60ab-43c4-820c-471019d124ce",
+      "name": "Sticky Note 7e25982c",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        0,
+        300
+      ],
+      "parameters": {
+        "content": "## D9 - Pull the SDR's outcomes\nDaily 18:00: read the whole sheet, keep rows with a Status or Notes, intel_record_outcome. Worked / Meeting booked / Not a fit stop the account re-surfacing in D8. The sheet is the only writer of Status and Notes; Supabase is the only writer of everything else.",
+        "color": 4,
+        "width": 560,
+        "height": 150
+      }
+    },
+    {
+      "id": "cfb3febf-22b9-4794-b045-c60686b6ba5b",
+      "name": "Daily 18:00",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.4,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "days",
+              "triggerAtHour": 18
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "31d6a570-f351-4f44-88c8-ace479a3b6ee",
+      "name": "Read sheet",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        224,
+        96
+      ],
+      "parameters": {
+        "resource": "sheet",
+        "operation": "read",
+        "authentication": "oAuth2",
+        "documentId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "SHEET_ID_SDR_CALL_LIST"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "Sheet1"
+        },
+        "options": {}
+      },
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "CRED_GSHEETS_2",
+          "name": "Google Sheets OAuth2 (second account)"
+        }
+      },
+      "executeOnce": true
+    },
+    {
+      "id": "59f334a6-ea6f-4c7e-8a28-a94396a2e892",
+      "name": "Pull now (manual)",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        192
+      ],
+      "parameters": {}
+    },
+    {
+      "id": "ebc69c60-c9a6-4e4c-b3d0-da3dab1bb2c4",
+      "name": "Rows the SDR marked",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        448,
+        96
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// Only rows with a Status (or Notes) and a valid account_id go back to Supabase.\nconst out = [];\nfor (const it of $input.all()) {\n  const r = it.json;\n  const id = String(r.account_id || '').trim();\n  const status = String(r.Status || r.status || '').trim();\n  const notes = String(r.Notes || r.notes || '').trim();\n  if (!/^[0-9a-f-]{36}$/i.test(id)) continue;\n  if (!status && !notes) continue;\n  out.push({ json: { p_account_id: id, p_status: status || null, p_notes: notes || null, p_contact_name: String(r['Contact name'] || '').trim() || null } });\n}\nreturn out;"
+      }
+    },
+    {
+      "id": "a456f8cd-e3b1-4e2f-815e-c3aa91628ef0",
+      "name": "Record outcome (Supabase RPC)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        672,
+        96
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "https://YOUR_SUPABASE_PROJECT_REF.supabase.co/rest/v1/rpc/intel_record_outcome",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "supabaseApi",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json) }}",
+        "options": {
+          "batching": {
+            "batch": {
+              "batchSize": 10,
+              "batchInterval": 250
+            }
+          }
+        }
+      },
+      "credentials": {
+        "supabaseApi": {
+          "id": "CRED_SUPABASE",
+          "name": "Supabase (service role)"
+        }
+      },
+      "onError": "continueRegularOutput"
+    }
+  ],
+  "connections": {
+    "Daily 18:00": {
+      "main": [
+        [
+          {
+            "node": "Read sheet",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read sheet": {
+      "main": [
+        [
+          {
+            "node": "Rows the SDR marked",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Pull now (manual)": {
+      "main": [
+        [
+          {
+            "node": "Read sheet",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Rows the SDR marked": {
+      "main": [
+        [
+          {
+            "node": "Record outcome (Supabase RPC)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "nodeGroups": [],
+  "settings": {
+    "executionOrder": "v1",
+    "availableInMCP": true,
+    "errorWorkflow": "WF_ERROR_ALERT",
+    "timezone": "Europe/London"
+  },
+  "tags": []
+}

@@ -1,0 +1,260 @@
+{
+  "id": "WF_OWNER_LINKEDIN_LOOKUP",
+  "name": "B2 - Owner LinkedIn lookup",
+  "description": "Apify people search for the Companies House director of each scored agency; URL and title saved to ops.agencies.",
+  "nodes": [
+    {
+      "id": "0ca6106d-b9e0-4fbf-86d7-e1c64493d6d7",
+      "name": "Sticky Note 164f29d2",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        100,
+        300
+      ],
+      "parameters": {
+        "content": "## B2 - Owner LinkedIn lookup\nFor scored agencies with a director name from Companies House and no LinkedIn URL yet: one Apify harvestapi/linkedin-profile-search call per director (\"Name Company\", 3 results), keep the hit whose current company matches, save URL and title to ops.agencies. Paid: about $0.01 per lookup. Manual run, limit in Config.",
+        "color": 4,
+        "width": 560,
+        "height": 160
+      }
+    },
+    {
+      "id": "db170f99-5888-47b4-9738-47f8656cabbc",
+      "name": "Run lookup (manual)",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {}
+    },
+    {
+      "id": "a9c54050-aa1a-41ca-9fa0-e8b3451407a8",
+      "name": "Config",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.5,
+      "position": [
+        224,
+        0
+      ],
+      "parameters": {
+        "mode": "manual",
+        "assignments": {
+          "assignments": [
+            {
+              "id": "c1",
+              "name": "limit",
+              "type": "number",
+              "value": 40
+            },
+            {
+              "id": "c2",
+              "name": "region",
+              "type": "string",
+              "value": "london"
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "fb3bb785-95cb-4802-8145-98eb6960df46",
+      "name": "Load agencies",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        448,
+        0
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "https://YOUR_SUPABASE_PROJECT_REF.supabase.co/rest/v1/rpc/ops_outreach_candidates",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "supabaseApi",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ p_limit: $json.limit, p_region: $json.region }) }}",
+        "options": {
+          "timeout": 60000
+        }
+      },
+      "executeOnce": true,
+      "credentials": {
+        "supabaseApi": {
+          "id": "CRED_SUPABASE",
+          "name": "Supabase (service role)"
+        }
+      }
+    },
+    {
+      "id": "62215714-0ff5-4215-b56a-28125516e88d",
+      "name": "Apify profile search",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        672,
+        0
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.apify.com/v2/acts/harvestapi~linkedin-profile-search/run-sync-get-dataset-items",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ searchQuery: $json.owner_name + \" \" + $json.name.replace(/\\b(ltd|limited|llp|group|uk)\\b\\.?/gi, \"\").trim(), maxItems: 3 }) }}",
+        "options": {
+          "timeout": 180000,
+          "batching": {
+            "batch": {
+              "batchSize": 1,
+              "batchInterval": 1500
+            }
+          },
+          "response": {
+            "response": {
+              "outputPropertyName": "body",
+              "responseFormat": "text"
+            }
+          }
+        }
+      },
+      "onError": "continueRegularOutput",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "CRED_APIFY",
+          "name": "Apify (header auth)"
+        }
+      }
+    },
+    {
+      "id": "931e8fc4-e5a3-4b39-adb8-2701381ab4c8",
+      "name": "Pick the match",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        896,
+        0
+      ],
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// Keep the profile whose current company looks like the agency; otherwise the first result whose name matches; otherwise nothing.\n// Name match: surname exact, first name by 3-letter prefix (Benjamin/Ben, Nicholas/Nick, Christopher/Chris).\nconst a = $('Load agencies').item.json;\nlet rows = [];\ntry { const p = JSON.parse(String($json.body || '[]')); rows = Array.isArray(p) ? p : (p.items || []); } catch (e) { rows = []; }\nconst norm = s => String(s || '').toLowerCase().replace(/\\b(ltd|limited|llp|group|uk|recruitment|recruit|consulting|solutions|the)\\b/g, '').replace(/[^a-z0-9]/g, '');\nconst agency = norm(a.name);\nconst parts = String(a.owner_name || '').toLowerCase().replace(/[^a-z ]/g, ' ').split(/\\s+/).filter(Boolean);\nconst firstPref = (parts[0] || '').slice(0, 3), last = parts[parts.length - 1] || '';\nconst nameOf = r => String(r.fullName || r.name || [r.firstName, r.lastName].filter(Boolean).join(' ') || '').toLowerCase();\nconst companyOf = r => norm((r.currentPosition && (r.currentPosition.companyName || r.currentPosition.company)) || (r.currentCompany && r.currentCompany.name) || r.companyName || r.headline || '');\nconst urlOf = r => r.linkedinUrl || r.url || r.profileUrl || '';\nconst titleOf = r => r.headline || (r.currentPosition && r.currentPosition.title) || r.title || '';\nlet best = null, bestCo = false;\nfor (const r of rows) {\n  const nm = nameOf(r);\n  const nameOk = parts.length >= 2 && nm.includes(last) && (firstPref ? nm.includes(firstPref) : true);\n  if (!nameOk) continue;\n  const co = companyOf(r);\n  const coOk = !!(agency && co && (co.includes(agency) || agency.includes(co)));\n  if (coOk) { best = r; bestCo = true; break; }\n  if (!best) best = r;\n}\nreturn { json: { agency_id: a.agency_id, name: a.name, owner_name: a.owner_name, url: best ? urlOf(best) : '', title: best ? titleOf(best) : '', matched_name: best ? (best.fullName || best.name || [best.firstName, best.lastName].filter(Boolean).join(' ')) : '', company_match: bestCo, candidates: rows.length, first_candidate: rows[0] ? nameOf(rows[0]) : '' } };"
+      }
+    },
+    {
+      "id": "a06561e0-dcb1-4159-a607-80f3c688e35d",
+      "name": "Save to agency",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        1120,
+        0
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "https://YOUR_SUPABASE_PROJECT_REF.supabase.co/rest/v1/rpc/ops_set_owner_linkedin",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "supabaseApi",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ p_agency_id: $json.agency_id, p_url: $json.url, p_title: $json.title, p_name: \"\" }) }}",
+        "options": {
+          "timeout": 30000,
+          "batching": {
+            "batch": {
+              "batchSize": 5,
+              "batchInterval": 200
+            }
+          }
+        }
+      },
+      "onError": "continueRegularOutput",
+      "credentials": {
+        "supabaseApi": {
+          "id": "CRED_SUPABASE",
+          "name": "Supabase (service role)"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Run lookup (manual)": {
+      "main": [
+        [
+          {
+            "node": "Config",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Config": {
+      "main": [
+        [
+          {
+            "node": "Load agencies",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Load agencies": {
+      "main": [
+        [
+          {
+            "node": "Apify profile search",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Apify profile search": {
+      "main": [
+        [
+          {
+            "node": "Pick the match",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Pick the match": {
+      "main": [
+        [
+          {
+            "node": "Save to agency",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "nodeGroups": [
+    {
+      "id": "7497ba68-9ef9-4774-9dca-5dccfbb4b989",
+      "name": "Find and save",
+      "nodeIds": [
+        "a9c54050-aa1a-41ca-9fa0-e8b3451407a8",
+        "fb3bb785-95cb-4802-8145-98eb6960df46",
+        "62215714-0ff5-4215-b56a-28125516e88d",
+        "931e8fc4-e5a3-4b39-adb8-2701381ab4c8",
+        "a06561e0-dcb1-4159-a607-80f3c688e35d"
+      ],
+      "description": "Candidates from Supabase, one Apify search per director, best match saved back"
+    }
+  ],
+  "settings": {
+    "executionOrder": "v1",
+    "availableInMCP": true,
+    "errorWorkflow": "WF_ERROR_ALERT"
+  },
+  "tags": []
+}

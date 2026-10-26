@@ -1,0 +1,582 @@
+{
+  "id": "WF_D12_NEW_MONEY",
+  "name": "AI D12 - New money",
+  "description": "Hourly: Google News for freshly funded UK/IE startups, Sonnet extracts the raise, adds net-new accounts (or attaches funding to existing ones). No email: T1 alerts on Telegram with Mine / Owned. Enrichment and why-now follow on the normal schedules.",
+  "nodes": [
+    {
+      "id": "8b7ec3a6-7d06-4c0a-be51-29aa54fc6a64",
+      "name": "Every hour at :35",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.3,
+      "position": [
+        0,
+        16
+      ],
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "hours",
+              "hoursInterval": 1,
+              "triggerAtMinute": 35
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "1bc6f81c-0f79-4f3e-b0cb-732ed65b1341",
+      "name": "Queries",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        224,
+        112
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const qs = [\n  '(raises OR raised OR secures OR closes) (seed OR \"pre-seed\" OR \"Series A\" OR \"Series B\" OR \"funding round\") (startup OR scaleup) (UK OR London OR Manchester OR Edinburgh OR Bristol OR Cambridge OR Oxford OR Leeds OR Birmingham) when:2d',\n  '(raises OR secures) funding (startup OR scaleup) (Ireland OR Dublin OR Cork OR Galway) when:2d',\n  'AI startup (raises OR secures OR lands) million (UK OR London OR British) when:2d',\n  '\"Series A\" (London OR UK OR British) when:2d',\n  '(\"seed round\" OR \"pre-seed\") (UK OR London OR British OR Irish) startup when:2d'\n];\nreturn qs.map(q => ({ json: { q, url: 'https://news.google.com/rss/search?q=' + encodeURIComponent(q) + '&hl=en-GB&gl=GB&ceid=GB:en' } }));"
+      }
+    },
+    {
+      "id": "359f02ad-c32f-40a4-908f-d318826236ad",
+      "name": "Run now (manual)",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        208
+      ],
+      "parameters": {}
+    },
+    {
+      "id": "fa54dfd4-0d6b-48ba-b5fb-5eafae4ddf88",
+      "name": "Google News RSS",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        448,
+        112
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $json.url }}",
+        "options": {
+          "timeout": 20000,
+          "batching": {
+            "batch": {
+              "batchSize": 2,
+              "batchInterval": 1500
+            }
+          },
+          "response": {
+            "response": {
+              "responseFormat": "text",
+              "outputPropertyName": "body",
+              "neverError": true
+            }
+          }
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "a2e59f27-2883-4fbb-a52d-373aafd3d0fe",
+      "name": "Articles",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        672,
+        112
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const un = s => String(s || '').replace(/<!\\[CDATA\\[|\\]\\]>/g, '').replace(/&amp;/g, '&').replace(/&#39;/g, \"'\").replace(/&quot;/g, '\"').replace(/<[^>]+>/g, ' ').replace(/\\s+/g, ' ').trim();\nconst seen = new Set(); const out = [];\nfor (const it of $input.all()) {\n  const xml = String(it.json.body || '');\n  const re = /<item>([\\s\\S]*?)<\\/item>/g; let m;\n  while ((m = re.exec(xml))) {\n    const b = m[1];\n    const title = un((b.match(/<title>([\\s\\S]*?)<\\/title>/) || [,''])[1]);\n    const link = un((b.match(/<link>([\\s\\S]*?)<\\/link>/) || [,''])[1]);\n    const date = un((b.match(/<pubDate>([\\s\\S]*?)<\\/pubDate>/) || [,''])[1]);\n    const desc = un((b.match(/<description>([\\s\\S]*?)<\\/description>/) || [,''])[1]).slice(0, 400);\n    const src = un((b.match(/<source[^>]*>([\\s\\S]*?)<\\/source>/) || [,''])[1]);\n    if (!link || seen.has(link)) continue; seen.add(link);\n    if (!/rais|secur|clos|land|fund|invest|round|seed|series/i.test(title)) continue;\n    out.push({ json: { title, url: link, date: date ? new Date(date).toISOString().slice(0, 10) : null, text: desc, source: src } });\n  }\n}\nreturn out;"
+      }
+    },
+    {
+      "id": "d37e0631-09ec-4672-bb10-5a09e4be7e09",
+      "name": "Already seen? (Supabase RPC)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        896,
+        112
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "https://YOUR_SUPABASE_PROJECT_REF.supabase.co/rest/v1/rpc/intel_net_new_seen",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "supabaseApi",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ p_urls: $input.all().map(i => i.json.url) }) }}",
+        "options": {
+          "timeout": 60000,
+          "response": {
+            "response": {
+              "responseFormat": "text",
+              "outputPropertyName": "body"
+            }
+          }
+        }
+      },
+      "credentials": {
+        "supabaseApi": {
+          "id": "CRED_SUPABASE",
+          "name": "Supabase (service role)"
+        }
+      },
+      "executeOnce": true
+    },
+    {
+      "id": "4d10d17b-2249-496f-9040-7fd7ccfb6105",
+      "name": "Unseen articles",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1120,
+        112
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "let seen = []; try { seen = JSON.parse(String($input.first().json.body || '[]')).map(r => r.url); } catch (e) { seen = []; }\nconst s = new Set(seen);\nreturn $('Articles').all().filter(i => !s.has(i.json.url)).slice(0, 40);"
+      }
+    },
+    {
+      "id": "0315996e-e95e-441b-a213-e68f65c8308b",
+      "name": "Extract raise",
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.9,
+      "position": [
+        1344,
+        112
+      ],
+      "parameters": {
+        "promptType": "define",
+        "hasOutputParser": true,
+        "batching": {},
+        "text": "=You read one news headline and snippet and extract a funding round, if there is one. Return ONLY the JSON requested.\n\nHeadline: {{ $json.title }}\nSnippet: {{ $json.text }}\nSource: {{ $json.source }} Date: {{ $json.date }}\n\nRules:\n- is_raise is true only when ONE named company raised equity or venture money (seed, pre-seed, Series A/B/C, growth or strategic investment, angel round). Grants, government or Innovate UK awards, loans, charity fundraising, funds raised BY an investor (a VC closing a fund), accelerator cohorts, and round-ups listing several companies are is_raise false.\n- company: the company's name as written, without Ltd or Limited. domain: the company's website domain if it appears in the text, else an empty string.\n- amount as written (for example 4m pounds, $20 million) or empty. stage: seed, pre-seed, Series A, Series B, growth, angel or unknown.\n- event_date: YYYY-MM-DD from the article date.\n- uk_or_ie: true only if the company is based in the UK or Ireland (the article says so, or the city named is in the UK or Ireland). If unclear, false.\n- is_ai: true if the company's product is AI or machine learning.\n- location: city or country as stated.\n- summary: one sentence, facts only.\n- confidence 0 to 1 that company, amount and location are right."
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "298b5f55-f1bf-460b-8bf6-266517f4410b",
+      "name": "Sonnet 5.5",
+      "type": "@n8n/n8n-nodes-langchain.lmChatAnthropic",
+      "typeVersion": 1.6,
+      "position": [
+        1360,
+        336
+      ],
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "value": "claude-sonnet-5-5",
+          "mode": "list",
+          "cachedResultName": "Claude Sonnet 5.5"
+        },
+        "options": {
+          "temperature": 0
+        }
+      },
+      "credentials": {
+        "anthropicApi": {
+          "id": "CRED_ANTHROPIC",
+          "name": "Anthropic API"
+        }
+      }
+    },
+    {
+      "id": "8b867a47-796c-46f0-b257-21dbe887d778",
+      "name": "Raise schema",
+      "type": "@n8n/n8n-nodes-langchain.outputParserStructured",
+      "typeVersion": 1.3,
+      "position": [
+        1488,
+        336
+      ],
+      "parameters": {
+        "jsonSchemaExample": "{\"is_raise\":true,\"company\":\"Acme\",\"domain\":\"acme.com\",\"amount\":\"4m pounds\",\"stage\":\"Series A\",\"event_date\":\"2026-10-12\",\"location\":\"London\",\"uk_or_ie\":true,\"is_ai\":true,\"summary\":\"Acme raised a Series A led by X to expand into Europe\",\"confidence\":0.9}",
+        "autoFix": false
+      }
+    },
+    {
+      "id": "aa63b054-d12b-4b8e-b6e9-be90739411fc",
+      "name": "Keep UK/IE raises",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1696,
+        112
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const arts = $('Unseen articles').all();\nconst out = [];\n$input.all().forEach((it, i) => {\n  const o = it.json.output || {}; const a = (arts[i] || {}).json || {};\n  const ok = o.is_raise === true && o.uk_or_ie === true && (o.confidence || 0) >= 0.6 && !!o.company;\n  out.push({ json: { url: a.url, title: a.title, keep: ok, company: o.company || '', domain: o.domain || '', amount: o.amount || '', stage: o.stage || '', event_date: o.event_date || a.date, location: o.location || '', is_ai: o.is_ai === true, summary: o.summary || '' } });\n});\nreturn out;"
+      }
+    },
+    {
+      "id": "1e0d3d41-396c-42c9-bec3-7302dc5628c1",
+      "name": "Keep?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1920,
+        112
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "k",
+              "leftValue": "={{ $json.keep }}",
+              "operator": {
+                "type": "boolean",
+                "operation": "true"
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      }
+    },
+    {
+      "id": "7712121b-dc6b-4d6b-b260-c4f5073f766a",
+      "name": "Add net new (Supabase RPC)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        2144,
+        16
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "https://YOUR_SUPABASE_PROJECT_REF.supabase.co/rest/v1/rpc/intel_add_net_new",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "supabaseApi",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ p_name: $json.company, p_domain: $json.domain, p_amount: $json.amount, p_stage: $json.stage, p_url: $json.url, p_event_date: $json.event_date, p_is_ai: $json.is_ai, p_summary: $json.summary, p_location: $json.location }) }}",
+        "options": {
+          "timeout": 60000,
+          "batching": {
+            "batch": {
+              "batchSize": 1,
+              "batchInterval": 200
+            }
+          },
+          "response": {
+            "response": {
+              "responseFormat": "text",
+              "outputPropertyName": "body"
+            }
+          }
+        }
+      },
+      "credentials": {
+        "supabaseApi": {
+          "id": "CRED_SUPABASE",
+          "name": "Supabase (service role)"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "405817fa-7c2c-487e-b816-b83f20ec2127",
+      "name": "Mark seen (kept)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        2368,
+        16
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "https://YOUR_SUPABASE_PROJECT_REF.supabase.co/rest/v1/rpc/intel_net_new_mark_seen",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "supabaseApi",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ p_url: $('Keep?').item.json.url, p_outcome: (() => { try { return JSON.parse($json.body)[0].outcome; } catch (e) { return 'error'; } })(), p_company: $('Keep?').item.json.company }) }}",
+        "options": {
+          "timeout": 60000,
+          "batching": {
+            "batch": {
+              "batchSize": 1,
+              "batchInterval": 200
+            }
+          }
+        }
+      },
+      "credentials": {
+        "supabaseApi": {
+          "id": "CRED_SUPABASE",
+          "name": "Supabase (service role)"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "ccce6abd-defe-4890-b6c2-0f7e972f5871",
+      "name": "New ones",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2592,
+        16
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const kept = $('Keep?').all();\nconst news = [];\n$input.all().forEach((it, i) => {\n  let r = null; try { r = JSON.parse(String(it.json.body || '[]'))[0]; } catch (e) {}\n  const k = (kept[i] || {}).json || {};\n  if (r && r.outcome === 'new') news.push({ ...k, account_id: r.account_id });\n});\nif (!news.length) return [];\nconst lines = news.map(n => '- ' + n.company + (n.is_ai ? ' (AI)' : '') + ': ' + (n.amount || 'undisclosed') + ' ' + (n.stage || '') + ', ' + (n.location || 'UK') + '. ' + n.summary + '\\n  ' + n.url);\nconst body = 'Hi Jamie, ' + news.length + ' freshly funded UK/IE compan' + (news.length > 1 ? 'ies' : 'y') + ' not in the book, found in the last hour.\\n\\nCheck the CRM first. If nobody owns it, add it and it is yours.\\n\\n' + lines.join('\\n') + '\\n\\nIt will be on the call list within the hour with the opener written, marked NET NEW in Evidence.\\n\\nThanks';\nreturn [{ json: { subject: 'New money: ' + news.map(n => n.company).join(', ').slice(0, 80), body, count: news.length } }];"
+      }
+    },
+    {
+      "id": "cfe4014b-3b85-41bd-b059-2a90b54a5b80",
+      "name": "Email new money",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.2,
+      "position": [
+        2816,
+        16
+      ],
+      "parameters": {
+        "sendTo": "owner@example.com",
+        "subject": "={{ $json.subject }}",
+        "emailType": "text",
+        "message": "={{ $json.body }}",
+        "options": {}
+      },
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "CRED_GMAIL",
+          "name": "Gmail OAuth2"
+        }
+      },
+      "webhookId": "00000000-0000-4000-8000-000000000008",
+      "disabled": true
+    },
+    {
+      "id": "83d2da1c-26a6-44e5-a494-8fd14c82bda4",
+      "name": "Mark seen (skipped)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        2144,
+        208
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "https://YOUR_SUPABASE_PROJECT_REF.supabase.co/rest/v1/rpc/intel_net_new_mark_seen",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "supabaseApi",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ p_url: $json.url, p_outcome: \"skipped\", p_company: $json.company }) }}",
+        "options": {
+          "timeout": 60000,
+          "batching": {
+            "batch": {
+              "batchSize": 2,
+              "batchInterval": 200
+            }
+          }
+        }
+      },
+      "credentials": {
+        "supabaseApi": {
+          "id": "CRED_SUPABASE",
+          "name": "Supabase (service role)"
+        }
+      },
+      "onError": "continueRegularOutput"
+    }
+  ],
+  "connections": {
+    "Every hour at :35": {
+      "main": [
+        [
+          {
+            "node": "Queries",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Queries": {
+      "main": [
+        [
+          {
+            "node": "Google News RSS",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Run now (manual)": {
+      "main": [
+        [
+          {
+            "node": "Queries",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Google News RSS": {
+      "main": [
+        [
+          {
+            "node": "Articles",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Articles": {
+      "main": [
+        [
+          {
+            "node": "Already seen? (Supabase RPC)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Already seen? (Supabase RPC)": {
+      "main": [
+        [
+          {
+            "node": "Unseen articles",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Unseen articles": {
+      "main": [
+        [
+          {
+            "node": "Extract raise",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract raise": {
+      "main": [
+        [
+          {
+            "node": "Keep UK/IE raises",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Sonnet 5.5": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Extract raise",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Raise schema": {
+      "ai_outputParser": [
+        [
+          {
+            "node": "Extract raise",
+            "type": "ai_outputParser",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Keep UK/IE raises": {
+      "main": [
+        [
+          {
+            "node": "Keep?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Keep?": {
+      "main": [
+        [
+          {
+            "node": "Add net new (Supabase RPC)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Mark seen (skipped)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Add net new (Supabase RPC)": {
+      "main": [
+        [
+          {
+            "node": "Mark seen (kept)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Mark seen (kept)": {
+      "main": [
+        [
+          {
+            "node": "New ones",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "New ones": {
+      "main": [
+        [
+          {
+            "node": "Email new money",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "nodeGroups": [],
+  "settings": {
+    "executionOrder": "v1",
+    "availableInMCP": true,
+    "errorWorkflow": "WF_ERROR_ALERT",
+    "timezone": "Europe/London",
+    "saveDataSuccessExecution": "none"
+  },
+  "tags": []
+}

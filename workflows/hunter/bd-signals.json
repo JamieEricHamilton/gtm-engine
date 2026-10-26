@@ -1,0 +1,870 @@
+{
+  "id": "WF_BD_SIGNALS",
+  "name": "BD - Signals",
+  "description": "Weekly: scrape Reed tech adverts (Apify), upsert agencies and signals into Supabase ops, enrich via Companies House, ICP-score with Sonnet.",
+  "nodes": [
+    {
+      "id": "cabbb8d6-04c3-4c78-b607-34a817a49f86",
+      "name": "Weekly Monday 07:00",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.4,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "weeks",
+              "triggerAtDay": [
+                1
+              ],
+              "triggerAtHour": 7
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "6b255648-6229-462c-90c9-71199be5be3f",
+      "name": "Config",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.5,
+      "position": [
+        224,
+        0
+      ],
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "c1",
+              "name": "search_terms",
+              "type": "string",
+              "value": "software engineer, devops engineer, developer"
+            },
+            {
+              "id": "c2",
+              "name": "locations",
+              "type": "string",
+              "value": "Chelmsford, Colchester, Brentwood, London"
+            },
+            {
+              "id": "c3",
+              "name": "distance_miles",
+              "type": "number",
+              "value": 15
+            },
+            {
+              "id": "c4",
+              "name": "resourcer_terms",
+              "type": "string",
+              "value": "resourcer, recruitment administrator, delivery consultant, recruitment coordinator"
+            },
+            {
+              "id": "c5",
+              "name": "results_per_query",
+              "type": "number",
+              "value": 100
+            },
+            {
+              "id": "c6",
+              "name": "score_limit",
+              "type": "number",
+              "value": 150
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "ec7f73ab-3df5-4eac-8536-9f699b8b3109",
+      "name": "Normalise adverts",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        672,
+        0
+      ],
+      "parameters": {
+        "jsCode": "// One item per advert from the Reed API, shaped for ingest_signal. Signal type comes from the search that found it.\n// Reed search results (observed): jobId, employerName, employerId, jobTitle, locationName, minimumSalary, maximumSalary, currency, date (DD/MM/YYYY), expirationDate, jobDescription, applications, jobUrl.\n// hiring_resourcer searches are keyword matches and very loose, so the TITLE must look like an agency hiring for its own desk.\nconst RESOURCER = /\\bresourc(er|ing)\\b|recruit(ment|ing)? (administrator|coordinator|co-ordinator|assistant|consultant|resourcer)|delivery consultant|trainee recruit|graduate recruit|360 recruit|recruitment executive|talent (acquisition|partner|consultant)/i;\nconst CLIENT_SIDE = /\\bin-?house\\b|\\binternal\\b|\\bHR\\b|human resources|people (partner|advisor|coordinator)/i;\nconst seen = new Set();\nconst out = [];\nconst all = $input.all();\nfor (let i = 0; i < all.length; i++) {\n  const resp = all[i].json;\n  let search = {};\n  try { search = $('Build searches').all()[i].json; } catch (e) {}\n  const results = Array.isArray(resp.results) ? resp.results : [];\n  for (const j of results) {\n    const name = String(j.employerName || '').trim();\n    const id = j.jobId;\n    if (!name || !id) continue;\n    const title = String(j.jobTitle || '');\n    const type = search.signal_type || 'job_advert';\n    if (type === 'hiring_resourcer' && (!RESOURCER.test(title) || CLIENT_SIDE.test(title))) continue;\n    const url = j.jobUrl || ('https://www.reed.co.uk/jobs/' + id);\n    const key = type + '|' + url;\n    if (seen.has(key)) continue;\n    seen.add(key);\n    let seen_at = new Date().toISOString();\n    const m = String(j.date || '').match(/^(\\d{2})\\/(\\d{2})\\/(\\d{4})$/);\n    if (m) seen_at = new Date(Date.UTC(+m[3], +m[2] - 1, +m[1])).toISOString();\n    const pay = (j.minimumSalary || j.maximumSalary) ? ('£' + [j.minimumSalary, j.maximumSalary].filter(Boolean).map(n => Number(n).toLocaleString('en-GB')).join(' - ')) : '';\n    const apps = (j.applications === 0 || j.applications) ? Number(j.applications) : null;\n    const summary = String(j.jobDescription || '').replace(/\\s+/g, ' ').trim().slice(0, 300);\n    const bits = [title, j.locationName, pay, apps !== null ? apps + ' applications' : ''].filter(Boolean);\n    out.push({ json: {\n      name,\n      region: j.locationName || search.location || null,\n      source_url: url,\n      detail: bits.join(' | ') + (summary ? ' | ' + summary : ''),\n      seen_at,\n      signal_type: type,\n      applications: apps\n    } });\n  }\n}\nreturn out;"
+      }
+    },
+    {
+      "id": "2aa7fb8d-0041-4368-97ae-c2c566b8ff14",
+      "name": "Ingest signal (Supabase RPC)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        896,
+        0
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "https://YOUR_SUPABASE_PROJECT_REF.supabase.co/rest/v1/rpc/ingest_signal",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "supabaseApi",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ p_name: $json.name, p_region: $json.region, p_source_url: $json.source_url, p_detail: $json.detail, p_seen_at: $json.seen_at, p_type: $json.signal_type || 'job_advert', p_applications: $json.applications }) }}",
+        "options": {
+          "batching": {
+            "batch": {
+              "batchSize": 10,
+              "batchInterval": 250
+            }
+          }
+        }
+      },
+      "credentials": {
+        "supabaseApi": {
+          "id": "CRED_SUPABASE",
+          "name": "Supabase (service role)"
+        }
+      }
+    },
+    {
+      "id": "53442adf-0c5f-4a23-a3cf-791c6545e316",
+      "name": "Load agencies to score",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        1120,
+        0
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "https://YOUR_SUPABASE_PROJECT_REF.supabase.co/rest/v1/rpc/agencies_to_score_v2",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "supabaseApi",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ p_limit: 150 }) }}",
+        "options": {}
+      },
+      "credentials": {
+        "supabaseApi": {
+          "id": "CRED_SUPABASE",
+          "name": "Supabase (service role)"
+        }
+      },
+      "executeOnce": true
+    },
+    {
+      "id": "f98d3558-b7a5-4aab-963c-8344f1a7bba4",
+      "name": "Companies House search",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        1344,
+        0
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "https://api.company-information.service.gov.uk/search/companies",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBasicAuth",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "q",
+              "value": "={{ $json.name }}"
+            },
+            {
+              "name": "items_per_page",
+              "value": "5"
+            },
+            {
+              "name": "restrictions",
+              "value": "active-companies"
+            }
+          ]
+        },
+        "options": {
+          "batching": {
+            "batch": {
+              "batchSize": 5,
+              "batchInterval": 1100
+            }
+          }
+        }
+      },
+      "credentials": {
+        "httpBasicAuth": {
+          "id": "CRED_COMPANIES_HOUSE",
+          "name": "Companies House API (basic auth)"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "17148870-0566-4233-ace6-817dc82ba9a2",
+      "name": "Pick CH match",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1568,
+        0
+      ],
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// Same normalisation as ops.normalise_company_name in Supabase. Exact match first, then prefix, else none.\nconst a = $('Load agencies to score').item.json;\nconst norm = s => String(s || '').toLowerCase().replace(/\\b(ltd|limited|llp|plc|uk|group|holdings)\\b/g, '').replace(/[^a-z0-9]/g, '');\nconst items = Array.isArray($json.items) ? $json.items : [];\nconst target = norm(a.name);\nconst active = items.filter(i => i.company_status === 'active');\nconst exact = active.find(i => norm(i.title) === target);\nconst prefix = active.find(i => target.length >= 6 && (norm(i.title).startsWith(target) || target.startsWith(norm(i.title))));\nconst m = exact || prefix || null;\nreturn { json: {\n  ...a,\n  company_number: m ? m.company_number : null,\n  ch_name: m ? m.title : null,\n  incorporated_on: m ? m.date_of_creation : null,\n  ch_locality: (m && m.address && m.address.locality) ? m.address.locality : null,\n  ch_match: exact ? 'exact' : (prefix ? 'prefix' : 'none')\n} };"
+      }
+    },
+    {
+      "id": "0b45aedc-3ea0-48b7-9d42-ee96a03435b5",
+      "name": "CH match found?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        1792,
+        0
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "h1",
+              "leftValue": "={{ $json.company_number }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notEmpty",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "20fab9b4-72c0-416b-805c-d034a81feb07",
+      "name": "Companies House profile",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        2016,
+        -112
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "=https://api.company-information.service.gov.uk/company/{{ $json.company_number }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBasicAuth",
+        "options": {
+          "batching": {
+            "batch": {
+              "batchSize": 5,
+              "batchInterval": 1100
+            }
+          }
+        }
+      },
+      "credentials": {
+        "httpBasicAuth": {
+          "id": "CRED_COMPANIES_HOUSE",
+          "name": "Companies House API (basic auth)"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "a6d2bce0-08e3-4bfb-8a92-51d646c4ccaa",
+      "name": "Enrich agency (Supabase RPC)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        2688,
+        -112
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "https://YOUR_SUPABASE_PROJECT_REF.supabase.co/rest/v1/rpc/enrich_agency",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "supabaseApi",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ p_agency_id: $json.agency_id, p_company_number: $json.company_number, p_ch_name: $json.ch_name, p_incorporated_on: $json.incorporated_on, p_sic_codes: $json.sic_codes, p_region: $json.ch_locality, p_owner_name: $json.owner_name, p_owner_role: $json.owner_role, p_active_directors: $json.active_directors }) }}",
+        "options": {
+          "batching": {
+            "batch": {
+              "batchSize": 10,
+              "batchInterval": 250
+            }
+          }
+        }
+      },
+      "credentials": {
+        "supabaseApi": {
+          "id": "CRED_SUPABASE",
+          "name": "Supabase (service role)"
+        }
+      }
+    },
+    {
+      "id": "9eb9ae63-c2a8-4f49-832d-98ec26d03461",
+      "name": "Scoring input",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2912,
+        0
+      ],
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// Fan-in: matched agencies arrive from Enrich (via Pick owner), unmatched straight from the IF. One shape for the scorer.\nlet a = null;\ntry { a = $('Pick owner').item.json; } catch (e) {}\nif (!a || !a.agency_id) a = $('Pick CH match').item.json;\nreturn { json: { ...a } };"
+      }
+    },
+    {
+      "id": "f9d1a21c-9032-426b-b609-f46bca837bb6",
+      "name": "Score ICP fit",
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.9,
+      "position": [
+        3136,
+        0
+      ],
+      "parameters": {
+        "promptType": "define",
+        "hasOutputParser": true,
+        "batching": {},
+        "text": "=You score UK recruitment agencies as prospects for OpsAutomated, a managed AI automation service for small agencies (candidate inflow and screening built on their ATS). Return ONLY the JSON requested, no commentary.\n\nICP: UK recruitment agency, owner-led, 3-12 consultants (sub-20 staff), on an ATS, posting roles regularly. Niche agencies (tech, engineering, healthcare, finance) score higher. NOT an ICP: direct employers, large national agencies (Hays, Reed, Michael Page, Robert Walters, Adecco, Randstad, Manpower, Morgan McKinley, Noir, Opus, Sanderson and similar), umbrella companies, job boards, RPOs. An advertiser with 20+ live adverts is almost certainly too large.\n\nSTRONG SIGNALS, in order: hiring a resourcer, administrator or delivery consultant for its OWN desk (they are about to pay a person to handle inflow); high application counts on live adverts; several live roles at once; a small, long-standing company with one or two directors.\nA [hiring_resourcer] advert only counts if it reads like the agency hiring for itself (\"join our team\", \"we are a specialist agency\", \"our desk\"). If it reads like a role recruited for a client, or the advertiser is a rec-to-rec firm, ignore it as a signal.\n\nEVIDENCE\nagency_id: {{ $json.agency_id }} (return this exact value in the JSON, unchanged)\nAdvertiser name: {{ $json.name }}\nCompanies House: {{ $json.ch_name || \"no match\" }} ({{ $json.company_number || \"-\" }}), incorporated {{ $json.incorporated_on || \"-\" }}, SIC {{ ($json.sic_codes || []).join(\", \") || \"unknown\" }} (78109 = recruitment agency, 78200 = temp agency, 78300 = other HR provision)\nOwner / longest-serving director: {{ $json.owner_name || \"unknown\" }} ({{ $json.owner_role || \"-\" }}), active directors: {{ $json.active_directors ?? \"unknown\" }}\nRegion: {{ $json.region || \"-\" }}\nLive job adverts in the last 45 days: {{ $json.advert_count }}\nApplication counts: {{ ($json.adverts || []).some(x => x.applications !== null && x.applications !== undefined) ? ($json.total_applications + \" in total across the adverts that report it\") : \"not available for these adverts (treat as unknown, not zero)\" }}\n{{ ($json.adverts || []).slice(0, 12).map(x => \"- [\" + x.type + \"] \" + x.detail).join(\"\\n\") }}\n\nRULES\n- Every field must be present and non-null. Strings you cannot determine are the exact string \"unknown\". Booleans are true or false. icp_score is a whole number 1-10. agency_id is copied exactly from the evidence.\n- Missing data is unknown, never evidence against. Never penalise an agency for data that is not available, and never mention the absence of data or of a signal in why_now.\n- is_agency: true only if the evidence says this is a recruitment agency (SIC 78xxx, \"our client\" language, agency-style name, or several roles across different employers). Direct employers get is_agency false and icp_score 1.\n- icp_score 1-10: 9-10 agency plus a genuine own-desk resourcer hire or heavy application volume; 7-8 clearly a small agency (1-2 directors, SIC 78xxx) with two or more live roles; 5-6 agency with a single live role or thin evidence; 1-4 poor, unclear or too large.\n- headcount_band: one of \"1-2\", \"3-12\", \"13-20\", \"20+\", \"unknown\". Infer from directors, company age, advert volume and tone. One director and a handful of roles is usually 3-12, not 1-2.\n- vertical: one or two words (tech, engineering, healthcare, finance, construction, generalist) or \"unknown\".\n- why_now: maximum 40 words. An OBSERVATION about this agency's live roles only: what they are hiring for, where, how many, application volume if known, an own-desk resourcer hire if there is one. Positive facts only. Never a pitch, never mention automation, screening, saving time or OpsAutomated. Example: \"Hiring a resourcer in Chelmsford while running four live .NET roles, two of them past 60 applications.\"\n- disqualify: true if is_agency is false or this is a large agency.\n- reason: one sentence on the evidence you used."
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "id": "5c12b6fc-be8c-41c2-a9fc-a5a3cf24fa75",
+      "name": "Claude Sonnet 5.5",
+      "type": "@n8n/n8n-nodes-langchain.lmChatAnthropic",
+      "typeVersion": 1.6,
+      "position": [
+        3056,
+        208
+      ],
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "value": "claude-sonnet-5-5",
+          "mode": "list",
+          "cachedResultName": "Claude Sonnet 5.5"
+        },
+        "options": {}
+      },
+      "credentials": {
+        "anthropicApi": {
+          "id": "CRED_ANTHROPIC",
+          "name": "Anthropic API"
+        }
+      }
+    },
+    {
+      "id": "297c5384-21ac-4323-81fa-ec892bde7325",
+      "name": "ICP schema",
+      "type": "@n8n/n8n-nodes-langchain.outputParserStructured",
+      "typeVersion": 1.3,
+      "position": [
+        3280,
+        208
+      ],
+      "parameters": {
+        "jsonSchemaExample": "{\n  \"agency_id\": \"1135f0f0-157f-449f-9929-f2eb17feaab1\",\n  \"is_agency\": true,\n  \"icp_score\": 8,\n  \"vertical\": \"tech\",\n  \"headcount_band\": \"3-12\",\n  \"why_now\": \"Hiring a resourcer in Chelmsford while running four live .NET roles, two of them past 60 applications.\",\n  \"disqualify\": false,\n  \"reason\": \"SIC 78109, our-client language in adverts, incorporated 2019.\"\n}",
+        "autoFix": true
+      }
+    },
+    {
+      "id": "d1a01f88-69e8-4daa-bdb6-785893c52bf0",
+      "name": "Save score (Supabase RPC)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        3488,
+        0
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "https://YOUR_SUPABASE_PROJECT_REF.supabase.co/rest/v1/rpc/score_agency",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "supabaseApi",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ p_agency_id: $json.output.agency_id, p_icp_score: Number($json.output.icp_score) || 1, p_why_now: String($json.output.why_now || '').split(/\\s+/).slice(0, 40).join(' '), p_vertical: $json.output.vertical || null, p_headcount_band: $json.output.headcount_band || null, p_disqualify: $json.output.disqualify === true || $json.output.is_agency === false }) }}",
+        "options": {
+          "batching": {
+            "batch": {
+              "batchSize": 10,
+              "batchInterval": 250
+            }
+          }
+        }
+      },
+      "credentials": {
+        "supabaseApi": {
+          "id": "CRED_SUPABASE",
+          "name": "Supabase (service role)"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "78bdf745-f383-4642-8023-518b7afdca4b",
+      "name": "Sticky Note c52e00cf",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        100,
+        300
+      ],
+      "parameters": {
+        "content": "## BD - Signals v1\nReed adverts → Supabase ops.agencies / ops.signals → Companies House → Sonnet ICP score.\n\nWrites go through SQL functions (ingest_signal, enrich_agency, score_agency, agencies_to_score) so dedupe and status rules live in the database, not here.\n\nChange the search in Config. ATS detection is parked: Reed URLs never reveal the ATS; needs the agency website.",
+        "color": 4
+      }
+    },
+    {
+      "id": "e037d70e-e516-494a-9988-6a0f07dedb4a",
+      "name": "Sonnet (autofix)",
+      "type": "@n8n/n8n-nodes-langchain.lmChatAnthropic",
+      "typeVersion": 1.6,
+      "position": [
+        3424,
+        400
+      ],
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "cachedResultName": "Claude Sonnet 5.5",
+          "mode": "list",
+          "value": "claude-sonnet-5-5"
+        },
+        "options": {}
+      },
+      "credentials": {
+        "anthropicApi": {
+          "id": "CRED_ANTHROPIC",
+          "name": "Anthropic API"
+        }
+      }
+    },
+    {
+      "id": "153cf625-5e84-4145-974b-a7d9e0ae35fb",
+      "name": "Score only (manual)",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        896,
+        208
+      ],
+      "parameters": {}
+    },
+    {
+      "id": "11ea459c-c9a8-4799-9021-eacd401945bc",
+      "name": "Build searches",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        448,
+        -176
+      ],
+      "parameters": {
+        "jsCode": "// One item per (keyword, location, signal type). Reed is searched once per item, 100 results each, agencies only.\nconst c = $input.first().json;\nconst split = s => String(s || '').split(',').map(x => x.trim()).filter(Boolean);\nconst out = [];\nfor (const location of split(c.locations)) {\n  for (const keywords of split(c.search_terms)) out.push({ json: { keywords, location, signal_type: 'job_advert', distance: Number(c.distance_miles) || 15, take: Number(c.results_per_query) || 100 } });\n  for (const keywords of split(c.resourcer_terms)) out.push({ json: { keywords, location, signal_type: 'hiring_resourcer', distance: Number(c.distance_miles) || 15, take: Number(c.results_per_query) || 100 } });\n}\nreturn out;"
+      }
+    },
+    {
+      "id": "d2e4d691-3f2f-42c3-a7c4-328124eb298e",
+      "name": "Search Reed",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        672,
+        -176
+      ],
+      "parameters": {
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBasicAuth",
+        "method": "GET",
+        "options": {
+          "batching": {
+            "batch": {
+              "batchInterval": 1000,
+              "batchSize": 2
+            }
+          }
+        },
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "keywords",
+              "value": "={{ $json.keywords }}"
+            },
+            {
+              "name": "locationName",
+              "value": "={{ $json.location }}"
+            },
+            {
+              "name": "distanceFromLocation",
+              "value": "={{ $json.distance }}"
+            },
+            {
+              "name": "postedByRecruitmentAgency",
+              "value": "true"
+            },
+            {
+              "name": "resultsToTake",
+              "value": "={{ $json.take }}"
+            }
+          ]
+        },
+        "sendQuery": true,
+        "url": "https://www.reed.co.uk/api/1.0/search"
+      },
+      "credentials": {
+        "httpBasicAuth": {
+          "id": "CRED_REED",
+          "name": "Reed Jobseeker API (basic auth)"
+        }
+      }
+    },
+    {
+      "id": "5fbf9e20-29ee-4d31-9b72-900f5a249c14",
+      "name": "Companies House officers",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        2240,
+        -112
+      ],
+      "parameters": {
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBasicAuth",
+        "method": "GET",
+        "options": {
+          "batching": {
+            "batch": {
+              "batchInterval": 1100,
+              "batchSize": 5
+            }
+          }
+        },
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "items_per_page",
+              "value": "35"
+            }
+          ]
+        },
+        "sendQuery": true,
+        "url": "=https://api.company-information.service.gov.uk/company/{{ $('Pick CH match').item.json.company_number }}/officers"
+      },
+      "credentials": {
+        "httpBasicAuth": {
+          "id": "CRED_COMPANIES_HOUSE",
+          "name": "Companies House API (basic auth)"
+        }
+      }
+    },
+    {
+      "id": "20488393-9320-4d4d-9282-828a135a173e",
+      "name": "Pick owner",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2464,
+        -112
+      ],
+      "parameters": {
+        "jsCode": "// Owner = longest-serving active director who is a person (corporate officers have no comma). Name observed as 'SURNAME, Forename Middle'.\nconst a = $('Pick CH match').item.json;\nlet profile = {};\ntry { profile = $('Companies House profile').item.json || {}; } catch (e) {}\nconst items = Array.isArray($json.items) ? $json.items : [];\nconst active = items.filter(o => !o.resigned_on && /director|llp-member|member/.test(String(o.officer_role || '')));\nconst people = active.filter(o => String(o.name || '').includes(','));\npeople.sort((x, y) => String(x.appointed_on || '9999').localeCompare(String(y.appointed_on || '9999')));\nconst tc = s => String(s || '').toLowerCase().replace(/(^|[\\s-'])\\S/g, m => m.toUpperCase());\nlet owner_name = null, owner_role = null;\nif (people.length) {\n  const parts = String(people[0].name).split(',');\n  const surname = tc(parts[0].trim());\n  const forename = tc(parts.slice(1).join(',').trim().split(/\\s+/)[0]);\n  owner_name = (forename + ' ' + surname).trim();\n  owner_role = people[0].occupation || people[0].officer_role || null;\n}\nreturn { json: { ...a, sic_codes: Array.isArray(profile.sic_codes) ? profile.sic_codes : null, owner_name, owner_role, active_directors: active.length, directors_all: people.map(p => p.name) } };",
+        "mode": "runOnceForEachItem"
+      }
+    }
+  ],
+  "connections": {
+    "Weekly Monday 07:00": {
+      "main": [
+        [
+          {
+            "node": "Config",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalise adverts": {
+      "main": [
+        [
+          {
+            "node": "Ingest signal (Supabase RPC)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ingest signal (Supabase RPC)": {
+      "main": [
+        [
+          {
+            "node": "Load agencies to score",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Load agencies to score": {
+      "main": [
+        [
+          {
+            "node": "Companies House search",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Companies House search": {
+      "main": [
+        [
+          {
+            "node": "Pick CH match",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Pick CH match": {
+      "main": [
+        [
+          {
+            "node": "CH match found?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "CH match found?": {
+      "main": [
+        [
+          {
+            "node": "Companies House profile",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Scoring input",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Enrich agency (Supabase RPC)": {
+      "main": [
+        [
+          {
+            "node": "Scoring input",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Scoring input": {
+      "main": [
+        [
+          {
+            "node": "Score ICP fit",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Score ICP fit": {
+      "main": [
+        [
+          {
+            "node": "Save score (Supabase RPC)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Claude Sonnet 5.5": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Score ICP fit",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "ICP schema": {
+      "ai_outputParser": [
+        [
+          {
+            "node": "Score ICP fit",
+            "type": "ai_outputParser",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Sonnet (autofix)": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "ICP schema",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Score only (manual)": {
+      "main": [
+        [
+          {
+            "node": "Load agencies to score",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Config": {
+      "main": [
+        [
+          {
+            "node": "Build searches",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build searches": {
+      "main": [
+        [
+          {
+            "node": "Search Reed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Search Reed": {
+      "main": [
+        [
+          {
+            "node": "Normalise adverts",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Companies House profile": {
+      "main": [
+        [
+          {
+            "node": "Companies House officers",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Companies House officers": {
+      "main": [
+        [
+          {
+            "node": "Pick owner",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Pick owner": {
+      "main": [
+        [
+          {
+            "node": "Enrich agency (Supabase RPC)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "nodeGroups": [
+    {
+      "id": "170309f3-d8fd-403d-8bb1-3ff327172dc7",
+      "name": "1. Collect",
+      "nodeIds": [
+        "6b255648-6229-462c-90c9-71199be5be3f",
+        "11ea459c-c9a8-4799-9021-eacd401945bc",
+        "d2e4d691-3f2f-42c3-a7c4-328124eb298e",
+        "ec7f73ab-3df5-4eac-8536-9f699b8b3109",
+        "2aa7fb8d-0041-4368-97ae-c2c566b8ff14"
+      ],
+      "description": "Reed Jobseeker API, agencies only: tech roles and resourcer/admin roles, one signal per advert with its application count"
+    },
+    {
+      "id": "11176ed0-763c-40bd-bf7a-a78135495844",
+      "name": "2. Enrich",
+      "nodeIds": [
+        "53442adf-0c5f-4a23-a3cf-791c6545e316",
+        "f98d3558-b7a5-4aab-963c-8344f1a7bba4",
+        "17148870-0566-4233-ace6-817dc82ba9a2",
+        "0b45aedc-3ea0-48b7-9d42-ee96a03435b5",
+        "20fab9b4-72c0-416b-805c-d034a81feb07",
+        "5fbf9e20-29ee-4d31-9b72-900f5a249c14",
+        "20488393-9320-4d4d-9282-828a135a173e",
+        "a6d2bce0-08e3-4bfb-8a92-51d646c4ccaa",
+        "9eb9ae63-c2a8-4f49-832d-98ec26d03461"
+      ],
+      "description": "Companies House number, SIC codes, incorporation date, owner (longest-serving active director), active director count"
+    },
+    {
+      "id": "09f22c4e-b90d-43c7-b2ab-0298910c9e79",
+      "name": "3. Score",
+      "nodeIds": [
+        "f9d1a21c-9032-426b-b609-f46bca837bb6",
+        "5c12b6fc-be8c-41c2-a9fc-a5a3cf24fa75",
+        "297c5384-21ac-4323-81fa-ec892bde7325",
+        "e037d70e-e516-494a-9988-6a0f07dedb4a",
+        "d1a01f88-69e8-4daa-bdb6-785893c52bf0"
+      ],
+      "description": "Sonnet ICP score 1-10, headcount band, vertical and a 40-word why-now, saved to ops.agencies as status scored"
+    }
+  ],
+  "settings": {
+    "executionOrder": "v1",
+    "availableInMCP": true,
+    "errorWorkflow": "WF_ERROR_ALERT",
+    "timezone": "Europe/London",
+    "executionTimeout": 1800
+  },
+  "tags": []
+}

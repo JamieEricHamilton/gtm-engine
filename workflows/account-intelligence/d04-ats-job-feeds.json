@@ -1,0 +1,354 @@
+{
+  "id": "WF_D04_ATS_JOB_FEEDS",
+  "name": "AI D4 - ATS job feeds",
+  "description": "Public ATS JSON feeds for accounts with a detected ATS, normalised into account_intel.jobs.",
+  "nodes": [
+    {
+      "id": "efd31696-c14e-4497-be6c-b12ed126e892",
+      "name": "Sticky Note b781d9b2",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        0,
+        320
+      ],
+      "parameters": {
+        "content": "## D4 - ATS job feeds\nAccounts with an ATS token from D3 → public JSON feed per provider (Greenhouse, Lever, Ashby, Workable, Recruitee, SmartRecruiters) → one row shape → account_intel.jobs_raw → intel_apply_jobs. Teamtailor, Personio, BambooHR, Workday have no simple public JSON feed and are skipped; D4b (LinkedIn jobs) covers them.",
+        "color": 4,
+        "width": 560,
+        "height": 160
+      }
+    },
+    {
+      "id": "f6f688fc-300b-4c2b-9110-f0a46aa96a69",
+      "name": "Weekly Sun 22:00",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.4,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "weeks",
+              "triggerAtDay": [
+                0
+              ],
+              "triggerAtHour": 22
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "ea0ba295-b464-40c9-b768-24a9a414f2bc",
+      "name": "Load accounts with ATS",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        224,
+        96
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "https://YOUR_SUPABASE_PROJECT_REF.supabase.co/rest/v1/rpc/intel_accounts_with_ats",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "supabaseApi",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ p_limit: 500 }) }}",
+        "options": {}
+      },
+      "credentials": {
+        "supabaseApi": {
+          "id": "CRED_SUPABASE",
+          "name": "Supabase (service role)"
+        }
+      },
+      "executeOnce": true
+    },
+    {
+      "id": "815f4d5d-da3b-47b8-9bf7-2be29b0e6ee1",
+      "name": "Run feeds (manual)",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        192
+      ],
+      "parameters": {}
+    },
+    {
+      "id": "eb083e6d-8cd2-4367-aefc-211dc3cc4410",
+      "name": "Feed URL",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        448,
+        96
+      ],
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// Public JSON job feeds per ATS. Providers without a public JSON feed get no URL and are skipped.\nconst a = $json; const t = a.ats_token;\nconst feeds = {\n  greenhouse: t => 'https://boards-api.greenhouse.io/v1/boards/' + t + '/jobs?content=true',\n  lever: t => 'https://api.lever.co/v0/postings/' + t + '?mode=json',\n  ashby: t => 'https://api.ashbyhq.com/posting-api/job-board/' + t,\n  workable: t => 'https://apply.workable.com/api/v1/widget/accounts/' + t + '?details=true',\n  recruitee: t => 'https://' + t + '.recruitee.com/api/offers/',\n  smartrecruiters: t => 'https://api.smartrecruiters.com/v1/companies/' + t + '/postings?limit=100'\n};\nconst f = feeds[a.ats_provider];\nreturn { json: { ...a, feed_url: (f && t) ? f(t) : null } };"
+      }
+    },
+    {
+      "id": "a7c68968-0310-4055-8db8-5d7c08a74d05",
+      "name": "Has feed URL",
+      "type": "n8n-nodes-base.filter",
+      "typeVersion": 2.2,
+      "position": [
+        672,
+        96
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "u1",
+              "leftValue": "={{ $json.feed_url }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notEmpty",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "0f710c10-ee63-4b12-b43a-4769b698d3d3",
+      "name": "Fetch feed",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        896,
+        96
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $json.feed_url }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Accept",
+              "value": "application/json"
+            },
+            {
+              "name": "User-Agent",
+              "value": "Mozilla/5.0 (compatible; OpsAutomated/1.0)"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 20000,
+          "batching": {
+            "batch": {
+              "batchSize": 4,
+              "batchInterval": 800
+            }
+          },
+          "response": {
+            "response": {
+              "responseFormat": "text",
+              "outputPropertyName": "body",
+              "neverError": true
+            }
+          }
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "3b1e5549-17eb-4c99-8657-013e3996127d",
+      "name": "Normalise feed",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1120,
+        96
+      ],
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// Six feed shapes → one row shape that intel_apply_jobs understands (account_id carried through).\nconst a = $('Feed URL').item.json;\nlet p = null; try { p = JSON.parse(String($json.body || '')); } catch (e) { p = null; }\nconst strip = h => String(h || '').replace(/<[^>]+>/g, ' ').replace(/&nbsp;|&amp;|&#39;|&quot;/g, ' ').replace(/\\s+/g, ' ').trim().slice(0, 4000);\nconst day = v => { if (!v) return null; const d = new Date(typeof v === 'number' ? v : String(v)); return isNaN(d) ? null : d.toISOString().slice(0, 10); };\nconst rows = [];\nconst push = (o) => rows.push({ account_id: a.account_id, source: 'ats_' + a.ats_provider, ...o });\nif (p) switch (a.ats_provider) {\n  case 'greenhouse': for (const j of (p.jobs || [])) push({ id: j.absolute_url, url: j.absolute_url, title: j.title, location: (j.location || {}).name, postedDate: day(j.first_published || j.updated_at), descriptionText: strip(j.content), employmentType: null }); break;\n  case 'lever': for (const j of (Array.isArray(p) ? p : [])) push({ id: j.hostedUrl, url: j.hostedUrl, title: j.text, location: (j.categories || {}).location, countryCode: j.country || null, postedDate: day(j.createdAt), descriptionText: String(j.descriptionPlain || '').slice(0, 4000), employmentType: (j.categories || {}).commitment, workplaceType: j.workplaceType }); break;\n  case 'ashby': for (const j of (p.jobs || [])) push({ id: j.jobUrl, url: j.jobUrl, title: j.title, location: j.location, postedDate: day(j.publishedAt), descriptionText: String(j.descriptionPlain || '').slice(0, 4000), employmentType: j.employmentType, workplaceType: j.isRemote ? 'Remote' : null }); break;\n  case 'workable': for (const j of (p.jobs || [])) push({ id: j.url, url: j.url, title: j.title, location: [j.city, j.country].filter(Boolean).join(', '), countryCode: null, postedDate: day(j.published_on), descriptionText: strip(j.description), employmentType: j.employment_type, workplaceType: j.telecommuting ? 'Remote' : null }); break;\n  case 'recruitee': for (const j of (p.offers || [])) push({ id: j.careers_url, url: j.careers_url, title: j.title, location: j.location, countryCode: j.country_code, postedDate: day(j.published_at), descriptionText: strip(j.description), employmentType: j.employment_type_code, workplaceType: j.remote ? 'Remote' : null }); break;\n  case 'smartrecruiters': for (const j of (p.content || [])) push({ id: 'https://jobs.smartrecruiters.com/' + a.ats_token + '/' + j.id, url: 'https://jobs.smartrecruiters.com/' + a.ats_token + '/' + j.id, title: j.name, location: [(j.location || {}).city, (j.location || {}).country].filter(Boolean).join(', '), countryCode: (j.location || {}).country, postedDate: day(j.releasedDate), descriptionText: '', employmentType: (j.typeOfEmployment || {}).label, workplaceType: (j.location || {}).remote ? 'Remote' : null }); break;\n}\nreturn { json: { batch_id: 'ats-' + a.ats_provider + '-' + a.ats_token, items: rows, count: rows.length, http: $json.statusCode || null } };"
+      }
+    },
+    {
+      "id": "66fef384-bc13-41dc-aebe-d99e483d5be3",
+      "name": "Save jobs raw (Supabase RPC)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        1344,
+        96
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "https://YOUR_SUPABASE_PROJECT_REF.supabase.co/rest/v1/rpc/intel_save_jobs_raw",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "supabaseApi",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ p_source: \"ats\", p_batch_id: $json.batch_id, p_items: $json.items }) }}",
+        "options": {
+          "timeout": 120000,
+          "batching": {
+            "batch": {
+              "batchSize": 1,
+              "batchInterval": 300
+            }
+          }
+        }
+      },
+      "credentials": {
+        "supabaseApi": {
+          "id": "CRED_SUPABASE",
+          "name": "Supabase (service role)"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "id": "a8b18a14-2abf-4fbe-95e5-998d9223675b",
+      "name": "Apply jobs (Supabase RPC)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        1568,
+        96
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "https://YOUR_SUPABASE_PROJECT_REF.supabase.co/rest/v1/rpc/intel_apply_jobs",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "supabaseApi",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({}) }}",
+        "options": {
+          "timeout": 240000
+        }
+      },
+      "credentials": {
+        "supabaseApi": {
+          "id": "CRED_SUPABASE",
+          "name": "Supabase (service role)"
+        }
+      },
+      "executeOnce": true,
+      "onError": "continueRegularOutput"
+    }
+  ],
+  "connections": {
+    "Weekly Sun 22:00": {
+      "main": [
+        [
+          {
+            "node": "Load accounts with ATS",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Load accounts with ATS": {
+      "main": [
+        [
+          {
+            "node": "Feed URL",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Run feeds (manual)": {
+      "main": [
+        [
+          {
+            "node": "Load accounts with ATS",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Feed URL": {
+      "main": [
+        [
+          {
+            "node": "Has feed URL",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Has feed URL": {
+      "main": [
+        [
+          {
+            "node": "Fetch feed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch feed": {
+      "main": [
+        [
+          {
+            "node": "Normalise feed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalise feed": {
+      "main": [
+        [
+          {
+            "node": "Save jobs raw (Supabase RPC)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save jobs raw (Supabase RPC)": {
+      "main": [
+        [
+          {
+            "node": "Apply jobs (Supabase RPC)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "nodeGroups": [],
+  "settings": {
+    "executionOrder": "v1",
+    "availableInMCP": true,
+    "errorWorkflow": "WF_ERROR_ALERT",
+    "timezone": "Europe/London",
+    "saveDataSuccessExecution": "none"
+  },
+  "tags": []
+}
