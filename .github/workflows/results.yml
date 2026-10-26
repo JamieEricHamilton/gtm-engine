@@ -12,18 +12,21 @@ jobs:
   refresh:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
       - name: Pull aggregates from the database
+        # Publishable (anon) key only. anon can execute intel_results() and nothing else; it has no
+        # table grants and RLS is enabled with no policies (supabase/migrations/0004_results_access.sql).
+        # No privileged key is held in this repository's Actions secrets.
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          SUPABASE_PUBLISHABLE_KEY: ${{ secrets.SUPABASE_PUBLISHABLE_KEY }}
           RESULTS_RPC: ${{ vars.RESULTS_RPC || 'intel_results' }}
         run: |
           set -euo pipefail
+          [[ "$RESULTS_RPC" =~ ^[a-z_]+$ ]] || { echo "bad RESULTS_RPC"; exit 1; }
           curl -sS -f -X POST "$SUPABASE_URL/rest/v1/rpc/$RESULTS_RPC" \
-            -H "apikey: $SUPABASE_SERVICE_ROLE_KEY" \
-            -H "Authorization: Bearer $SUPABASE_SERVICE_ROLE_KEY" \
+            -H "apikey: $SUPABASE_PUBLISHABLE_KEY" \
             -H "Content-Type: application/json" -d '{}' > results/latest.json
           python3 -c 'import json; json.load(open("results/latest.json"))'
 

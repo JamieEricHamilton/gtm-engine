@@ -1,0 +1,127 @@
+-- 0004: results access and reported outcomes.
+--
+-- 1. reported_outcomes: meetings the sheet's Status column does not capture. The SDR marks some
+--    outcomes on the sheet, not all, and the AE's own email bookings never touch the sheet. Reported
+--    counts live in the database so intel_results() and the public write-up agree. Aggregates only.
+create table if not exists account_intel.reported_outcomes (
+  id            serial primary key,
+  kind          text not null check (kind in ('count','monthly_rate')),
+  period_start  date not null,
+  period_end    date,
+  meetings      integer not null check (meetings >= 0),
+  booked_by     text not null check (booked_by in ('sdr','ae')),
+  source        text not null,
+  note          text,
+  reported_at   timestamptz not null default now()
+);
+alter table account_intel.reported_outcomes enable row level security;
+
+insert into account_intel.reported_outcomes (kind, period_start, period_end, meetings, booked_by, source, note) values
+  ('count',        '2026-10-12', '2026-10-18', 4,  'sdr', 'SDR, reported in the weekly sync', 'first week the list was live, worked from the sheet'),
+  ('count',        '2026-10-12', '2026-10-18', 1,  'ae',  'AE, own CRM',                      'cold email using the generated trigger line'),
+  ('monthly_rate', '2026-10-12', null,         12, 'sdr', 'SDR, reported in the weekly sync', 'lower bound of the monthly run rate since the list went live');
+
+-- 2. No privileged key in GitHub Actions. The weekly refresh calls intel_results() with the project's
+--    publishable (anon) key. anon has no table grants anywhere, RLS is enabled with no policies, and
+--    this is the only function anon may execute (granted after the revoke below), so the key can
+--    read aggregates and nothing else.
+
+-- 3. Close the implicit PUBLIC execute grant Postgres gives every function. Every function here is
+--    SECURITY DEFINER, so an implicit grant means anon could call it through PostgREST. service_role
+--    keeps its explicit grant; n8n is unaffected.
+revoke execute on all functions in schema public from public;
+alter default privileges for role postgres in schema public revoke execute on functions from public;
+grant execute on function public.intel_results() to anon;
+
+-- 4. A dedicated login role for the direct-connection variant of the refresh (psql over the pooler),
+--    if the REST path is ever dropped. Set its password out of band; it executes one function only.
+do $$
+begin
+  if not exists (select 1 from pg_roles where rolname = 'results_reader') then
+    create role results_reader login noinherit nosuperuser nocreatedb nocreaterole noreplication nobypassrls connection limit 3;
+  end if;
+end $$;
+alter role results_reader set statement_timeout = '60s';
+grant usage on schema public to results_reader;
+grant execute on function public.intel_results() to results_reader;
+
+-- 5. intel_results() with the reported outcomes added under "outcomes".
+create or replace function public.intel_results()
+returns jsonb
+language sql
+stable
+security definer
+set search_path to 'own_brand', 'public'
+as $function$
+select jsonb_build_object(
+ 'generated_at', now(),
+ 'pipeline', jsonb_build_object(
+   'accounts_total', (select count(*) from account_intel.accounts),
+   'by_origin', (select jsonb_object_agg(origin, n) from (select origin, count(*) n from account_intel.accounts group by 1) x),
+   'registry_matched', (select count(*) from account_intel.registry where company_number is not null),
+   'registry_confident', (select count(*) from account_intel.registry where match_confidence >= 0.85),
+   'registry_dead_disqualified', (select count(*) from account_intel.accounts where disqualified_reason like 'registry_%'),
+   'linkedin_attempted', (select count(*) from account_intel.accounts where li_attempts > 0),
+   'linkedin_enriched', (select count(*) from account_intel.accounts where li_enriched_at is not null),
+   'disqualified_total', (select count(*) from account_intel.accounts where disqualified_reason is not null),
+   'disqualified_by_reason', (select jsonb_object_agg(r, n) from (select case when disqualified_reason like 'registry_%' then 'registry_dead' when disqualified_reason in ('size_over_500','never_buy_industry') then disqualified_reason else 'manual' end r, count(*) n from account_intel.accounts where disqualified_reason is not null group by 1) x),
+   'careers_pages_scanned', (select count(*) from account_intel.accounts where scanned_at is not null),
+   'ats_detected', (select count(*) from account_intel.accounts where ats_provider is not null),
+   'ats_by_provider', (select jsonb_object_agg(ats_provider, n) from (select ats_provider, count(*) n from account_intel.accounts where ats_provider is not null group by 1) x),
+   'jobs_attempted', (select count(*) from account_intel.accounts where jobs_attempted_at is not null),
+   'accounts_with_live_roles', (select count(distinct account_id) from account_intel.jobs where closed_at is null),
+   'accounts_with_foreign_roles', (select count(distinct account_id) from account_intel.jobs where closed_at is null and country not in ('GB','IE','','OO','XX')),
+   'job_rows', (select count(*) from account_intel.jobs),
+   'news_attempted', (select count(*) from account_intel.accounts where news_attempted_at is not null),
+   'news_signals_by_kind', (select jsonb_object_agg(kind, n) from (select kind::text, count(*) n from account_intel.news_signals group by 1) x),
+   'why_now_lines', (select count(*) from account_intel.why_now where trigger_line is not null),
+   'bands', (select jsonb_object_agg(coalesce(band::text,'unscored'), n) from (select band, count(*) n from account_intel.accounts group by 1) x),
+   'score_version', (select score_version from account_intel.accounts where score_version is not null order by scored_at desc limit 1)
+ ),
+ 'funding', jsonb_build_object(
+   'accounts_with_press_raise', (select count(distinct account_id) from account_intel.news_signals where kind='funding' and source='news'),
+   'accounts_with_register_raise', (select count(distinct account_id) from account_intel.news_signals where kind='funding' and source='companies_house' and confidence in ('likely','confirmed')),
+   'register_raises_no_press_within_60d', (select count(*) from (select f.account_id from account_intel.filings f where f.filing_type='SH01' and f.amount_raised between 250000 and 50000000 and f.action_date >= current_date - 180 and not exists (select 1 from account_intel.news_signals p where p.account_id=f.account_id and p.kind='funding' and p.source='news' and p.event_date <= f.action_date + 60) group by 1) y),
+   'register_raise_gbp_capped_180d', (select sum(a) from (select f.account_id, sum(f.amount_raised) a from account_intel.filings f where f.filing_type='SH01' and f.amount_raised between 1000 and 50000000 and f.action_date >= current_date - 180 group by 1) x),
+   'filings_total', (select count(*) from account_intel.filings),
+   'sh01_pdfs_parsed', (select count(*) from account_intel.filings where filing_type='SH01' and amount_parsed_at is not null),
+   'net_new_total', (select count(*) from account_intel.accounts where origin='net_new'),
+   'net_new_owned_by_colleague', (select count(*) from account_intel.accounts where origin='net_new' and sf_status='owned'),
+   'net_new_released', (select count(*) from account_intel.accounts where origin='net_new' and sf_status is null)
+ ),
+ 'register_stream', jsonb_build_object(
+   'events_total', (select count(*) from account_intel.register_events),
+   'by_outcome', (select jsonb_object_agg(outcome, n) from (select outcome, count(*) n from account_intel.register_events group by 1) x),
+   'reject_reasons', (select jsonb_object_agg(r, n) from (select coalesce(split_part(reason,' ',1),'none') r, count(*) n from account_intel.register_events where outcome='rejected' group by 1) x),
+   'first_event', (select min(received_at) from account_intel.register_events),
+   'last_event', (select max(received_at) from account_intel.register_events),
+   'promoted_accounts', (select count(*) from account_intel.accounts where origin='register')
+ ),
+ 'alerts', jsonb_build_object(
+   'total', (select count(*) from account_intel.alerts where source <> 'test'),
+   'by_source', (select jsonb_object_agg(source, n) from (select source, count(*) n from account_intel.alerts where source <> 'test' group by 1) x),
+   'by_answer', (select jsonb_object_agg(coalesce(answer,'unanswered'), n) from (select case when answer in ('mine','owned','timeout') then answer when answer is null then null else 'other' end answer, count(*) n from account_intel.alerts where source <> 'test' group by 1) x)
+ ),
+ 'contacts', jsonb_build_object(
+   'requests_by_status', (select jsonb_object_agg(status, n) from (select status, count(*) n from account_intel.contact_requests group by 1) x),
+   'contacts_total', (select count(*) from account_intel.contacts),
+   'contacts_per_found_request', (select round(avg(c),2) from (select count(*) c from account_intel.contacts group by request_id) x),
+   'found_rate', (select round(100.0 * count(*) filter (where status='found') / nullif(count(*) filter (where status in ('found','none_found','no_match','no_linkedin')),0), 1) from account_intel.contact_requests)
+ ),
+ 'outcomes', jsonb_build_object(
+   'sheet_rows_live', (select count(*) from account_intel.sheet_state where removed_at is null),
+   'sheet_first_push', (select min(first_pushed_at) from account_intel.sheet_state),
+   'sheet_removed_by_reason', (select jsonb_object_agg(r, n) from (select case when remove_reason like 'disqualified%' then 'disqualified' when remove_reason in ('owned','customer') then remove_reason else 'manual' end r, count(*) n from account_intel.sheet_state where removed_at is not null group by 1) x),
+   'by_status', (select jsonb_object_agg(status, n) from (select status::text, count(*) n from account_intel.outcomes group by 1) x),
+   'first_outcome', (select min(last_touched) from account_intel.outcomes),
+   'meetings_by_band', (select jsonb_object_agg(coalesce(band::text,'none'), n) from (select a.band, count(*) n from account_intel.outcomes o join account_intel.accounts a on a.account_id=o.account_id where o.status='meeting_booked' group by 1) x),
+   'meetings_first_7_days', (select count(*) from account_intel.outcomes o where o.status='meeting_booked' and o.last_touched < (select min(first_pushed_at) from account_intel.sheet_state) + interval '7 days'),
+   'reported', (select jsonb_agg(jsonb_build_object('kind', kind, 'period_start', period_start, 'period_end', period_end, 'meetings', meetings, 'booked_by', booked_by, 'source', source, 'note', note) order by id) from account_intel.reported_outcomes),
+   'calibration', (select jsonb_agg(jsonb_build_object('band_at_win', band_at_win, 'score_at_win', score_at_win, 'lead_product_at_win', lead_product_at_win, 'band_now', band) order by score_at_win desc) from account_intel.v_calibration where is_customer)
+ ),
+ 'ops', jsonb_build_object(
+   'watchdog_entries', (select count(*) from account_intel.watchdog_log),
+   'apify_usage', (select value::jsonb from account_intel.settings where key='apify_usage')
+ )
+);
+$function$;
