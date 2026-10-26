@@ -1,7 +1,7 @@
 {
   "id": "WF_T1_NEW_MONEY_ALERTS",
   "name": "AI T1 - New money alerts",
-  "description": "Every 5 min: next confident raise goes to Jamie's Telegram. Not-in-book raises carry Mine / Owned buttons handled in-app by T0; raises on Jamie's own accounts are a plain heads-up.",
+  "description": "Every 5 min: next confident raise goes to the owner's Telegram. Not-in-book raises carry Mine / Owned buttons handled in-app by T0; raises on the owner's own accounts are a plain heads-up.",
   "nodes": [
     {
       "id": "e2f498fb-ec00-4da1-8742-3a13abfa35ce",

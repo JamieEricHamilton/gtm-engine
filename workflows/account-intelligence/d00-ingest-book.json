@@ -1,7 +1,7 @@
 {
   "id": "WF_D00_INGEST_BOOK",
   "name": "AI D0 - Ingest book",
-  "description": "One-off: read the raw the vendor book of business from a Google Sheet and upsert into account_intel.accounts via public.intel_upsert_accounts.",
+  "description": "One-off: read the raw account book of business from a Google Sheet and upsert into account_intel.accounts via public.intel_upsert_accounts.",
   "nodes": [
     {
       "id": "798aaa2b-bc2f-4852-99ba-df15f5448341",

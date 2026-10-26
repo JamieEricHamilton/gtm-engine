@@ -13,7 +13,7 @@
         300
       ],
       "parameters": {
-        "content": "## D8 - Push to the SDR's sheet\nDaily 07:00 (or manual): re-score → intel_sheet_rows (current A/B not closed by the SDR, plus anything previously pushed so its band updates) → Google Sheets Append or Update Row matched on account_id. Only the system columns A-J are written. Status + Notes (K, L) are the SDR's; Sequence + Sequence date (M, N) are Jamie's. Neither is ever touched by the push.\n\nFix sheet dropdowns re-applies the headers and all three dropdowns after every push (self-heal): Status = Worked / Meeting booked / Not a fit, Sequence = In sequence / Finished sequence, Sequence date = any date. To change a dropdown, edit that node, not the sheet.",
+        "content": "## D8 - Push to the SDR's sheet\nDaily 07:00 (or manual): re-score → intel_sheet_rows (current A/B not closed by the SDR, plus anything previously pushed so its band updates) → Google Sheets Append or Update Row matched on account_id. Only the system columns A-J are written. Status + Notes (K, L) are the SDR's; Sequence + Sequence date (M, N) are the owner's. Neither is ever touched by the push.\n\nFix sheet dropdowns re-applies the headers and all three dropdowns after every push (self-heal): Status = Worked / Meeting booked / Not a fit, Sequence = In sequence / Finished sequence, Sequence date = any date. To change a dropdown, edit that node, not the sheet.",
         "color": 4,
         "width": 560,
         "height": 160
