@@ -1,6 +1,6 @@
 # Results
 
-Generated 2026-10-26 13:14 UTC from `select public.intel_results();`
+Generated 2026-10-26 13:46 UTC from `select public.intel_results();`
 (definition in `supabase/migrations/0003_results.sql`). Aggregates only. Re-render with
 `python3 tools/render_results.py results/latest.json > RESULTS.md`; the weekly GitHub Action does the same.
 
@@ -8,7 +8,7 @@ Generated 2026-10-26 13:14 UTC from `select public.intel_results();`
 
 | Stage | Count | Rate |
 |---|---:|---:|
-| Accounts in the system | 3316 | book 3186, net-new from press 93, net-new from the register 37 |
+| Accounts in the system | 3317 | book 3186, net-new from press 94, net-new from the register 37 |
 | Matched to the companies register | 2840 | 85.6% of all accounts |
 | Register match at confidence 0.85 or above | 2474 | 87.1% of matches |
 | Disqualified (dead on the register) | 202 | exact-name matches to dissolved or liquidated companies only |
@@ -22,7 +22,7 @@ Generated 2026-10-26 13:14 UTC from `select public.intel_results();`
 | LinkedIn jobs checked | 2887 | |
 | Accounts with a live role | 269 | 9.3% of checked (2096 job rows) |
 | Accounts with a live role outside the home market | 91 | 3.2% of checked |
-| News checked | 3036 | signals by kind: funding 591, ignored 122, layoffs 15, expansion 71, new_office 72, acquisition 139, people_hire 17, project_win 78 |
+| News checked | 3037 | signals by kind: funding 592, ignored 122, layoffs 15, expansion 71, new_office 72, acquisition 139, people_hire 17, project_win 78 |
 | Trigger lines written by the LLM | 366 | one per A/B account, regenerated only when the evidence changes |
 
 Bands under scorer v1.6: A 56, B 272, C 1503, D 1485.
@@ -32,15 +32,15 @@ A and B together are 9.9% of the accounts.
 
 | Measure | Count |
 |---|---:|
-| Accounts with a press-announced raise in the last 9 months | 113 |
+| Accounts with a press-announced raise in the last 9 months | 114 |
 | Accounts with a confident register raise (SH01 share allotment, amount parsed from the PDF) | 82 |
 | Register raises of £250k+ in the last 180 days with no press within 60 days of the allotment | 44 |
 | Total parsed from SH01 PDFs in the last 180 days (per-account sums between £1k and £50m) | £525,446,823 |
 | Capital filings stored | 443 |
 | SH01 PDFs parsed | 304 |
-| Net-new funded companies found from the press | 93 |
-| ...of which already owned by a colleague in the CRM | 47 (50.5%) |
-| ...of which released to the call list | 21 |
+| Net-new funded companies found from the press | 94 |
+| ...of which already owned by a colleague in the CRM | 47 (50.0%) |
+| ...of which released to the call list | 22 |
 
 The press-to-owned ratio is the finding that justified the register stream: by the time a raise is
 in the news, most of those companies are already claimed by someone.
@@ -53,7 +53,7 @@ Outcomes: staged 15, existing 24, promoted 28, rejected 1095, too_small 259. Rej
 
 ## Alerts
 
-32 alerts sent to the owner's phone (news 27, register_book 4, register_stream 1). Answers: mine 5, other 1, owned 10, unanswered 16.
+33 alerts sent to the owner's phone (news 28, register_book 4, register_stream 1). Answers: mine 5, other 1, owned 10, unanswered 17.
 Alert rules are deliberately strict: one alert per account ever, headcount 10 to 500, £500k to £50m in a week.
 
 ## Contact ranking
@@ -72,14 +72,25 @@ LLM spend is not metered in the database; the console totals across the whole bu
 the account-intelligence pipeline (one full-book news sweep plus three why-now regenerations, see
 docs/POSTMORTEM-credit-incident.md) and well under $1 a day at steady state. Hosting is one small cloud VM at about €8 a month.
 
-## Outcomes (from the SDR's status column, pulled back nightly)
+## Outcomes
 
 Call list first pushed 2026-10-12 (13 days ago). 289 rows live;
-removed since: owned 29, manual 1, customer 2. Statuses recorded: worked 30, not_a_fit 1, meeting_booked 3.
-Meetings booked by band: A 2, B 1; 2 inside the first seven days.
+removed since: owned 29, manual 1, customer 2.
 
-Only meetings the SDR marks on the sheet are counted here. Meetings booked from the rep's own email
-sequences to the same accounts are tracked in the CRM, not in this database, and are not in these numbers.
+Meetings booked, as reported by the people who booked them (`account_intel.reported_outcomes`):
+
+| Period | Meetings | Booked by | Source |
+|---|---:|---|---|
+| 2026-10-12 to 2026-10-18 | 4 | SDR | SDR, reported in the weekly sync |
+| 2026-10-12 to 2026-10-18 | 1 | AE | AE, own CRM |
+| from 2026-10-12, per month | 12+ | SDR | SDR, reported in the weekly sync |
+
+First week the list was live: 5 meetings (4 by the SDR from the sheet, 1 from the AE's own cold email using the generated trigger line).
+Since then the SDR reports 12+ meetings a month working from the list.
+
+What the sheet itself captured: statuses recorded worked 30, not_a_fit 1, meeting_booked 3; meetings marked by band
+A 2, B 1, 2 of them inside the first seven days. The Status column only
+captures outcomes the SDR marks on the sheet, so the sheet-derived counts are a floor, not the full count.
 
 ## Calibration against won accounts
 
@@ -88,8 +99,8 @@ against accounts that actually bought:
 
 | Band at win | Score at win | Lead product at win | Band now |
 |---|---:|---|---|
-| A | 95 | eor | A |
-| B | 55 | eor | B |
+| A | 95.0 | eor | A |
+| B | 55.0 | eor | B |
 
 Both were surfaced from public signals before they inbounded. Two points is not a calibration; it is a check that the signal set is pointed the right way.
 

@@ -29,6 +29,20 @@ origin = p["by_origin"]
 dq = p["disqualified_by_reason"]
 apify = ops.get("apify_usage") or {}
 first_push = o["sheet_first_push"]
+def reported_rows(rows):
+    out = []
+    for r in rows:
+        period = f"{r['period_start']} to {r['period_end']}" if r.get('period_end') else f"from {r['period_start']}, per month"
+        out.append(f"| {period} | {r['meetings']}{'+' if r['kind'] == 'monthly_rate' else ''} | {r['booked_by'].upper()} | {r['source']} |")
+    return out
+
+reported = o.get("reported") or []
+week1 = [r for r in reported if r["kind"] == "count"]
+week1_sdr = sum(r["meetings"] for r in week1 if r["booked_by"] == "sdr")
+week1_ae = sum(r["meetings"] for r in week1 if r["booked_by"] == "ae")
+week1_total = week1_sdr + week1_ae
+monthly_rate = max([r["meetings"] for r in reported if r["kind"] == "monthly_rate"] or [0])
+
 days_live = (datetime.datetime.now(datetime.timezone.utc) - datetime.datetime.fromisoformat(first_push)).days if first_push else 0
 
 out = f"""# Results
@@ -105,14 +119,23 @@ LLM spend is not metered in the database; the console totals across the whole bu
 the account-intelligence pipeline (one full-book news sweep plus three why-now regenerations, see
 docs/POSTMORTEM-credit-incident.md) and well under $1 a day at steady state. Hosting is one small cloud VM at about €8 a month.
 
-## Outcomes (from the SDR's status column, pulled back nightly)
+## Outcomes
 
 Call list first pushed {day(first_push)} ({days_live} days ago). {o['sheet_rows_live']} rows live;
-removed since: {kv(o['sheet_removed_by_reason'])}. Statuses recorded: {kv(o['by_status'])}.
-Meetings booked by band: {kv(o['meetings_by_band'])}; {o['meetings_first_7_days']} inside the first seven days.
+removed since: {kv(o['sheet_removed_by_reason'])}.
 
-Only meetings the SDR marks on the sheet are counted here. Meetings booked from the rep's own email
-sequences to the same accounts are tracked in the CRM, not in this database, and are not in these numbers.
+Meetings booked, as reported by the people who booked them (`account_intel.reported_outcomes`):
+
+| Period | Meetings | Booked by | Source |
+|---|---:|---|---|
+""" + "\n".join(reported_rows(o.get('reported') or [])) + f"""
+
+First week the list was live: {week1_total} meetings ({week1_sdr} by the SDR from the sheet, {week1_ae} from the AE's own cold email using the generated trigger line).
+Since then the SDR reports {monthly_rate}+ meetings a month working from the list.
+
+What the sheet itself captured: statuses recorded {kv(o['by_status'])}; meetings marked by band
+{kv(o['meetings_by_band'])}, {o['meetings_first_7_days']} of them inside the first seven days. The Status column only
+captures outcomes the SDR marks on the sheet, so the sheet-derived counts are a floor, not the full count.
 
 ## Calibration against won accounts
 
