@@ -3,7 +3,7 @@ Renders dist/index.html in Chromium at phone, tablet and desktop widths and fail
 anything is off the system defined at the top of page.html. Run before every deploy.
 Usage: python3 check.py [path/to/index.html]
 """
-import sys, json, pathlib, asyncio, threading, functools
+import sys, pathlib, asyncio, threading, functools
 from http.server import ThreadingHTTPServer, SimpleHTTPRequestHandler
 from playwright.async_api import async_playwright
 

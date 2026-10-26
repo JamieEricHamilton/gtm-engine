@@ -1,0 +1,44 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - name: Every workflow export is valid JSON
+        run: |
+          set -euo pipefail
+          n=0
+          while IFS= read -r -d '' f; do
+            python3 -c 'import json,sys; json.load(open(sys.argv[1]))' "$f" || { echo "invalid JSON: $f"; exit 1; }
+            n=$((n+1))
+          done < <(find workflows -name '*.json' -print0)
+          echo "parsed $n workflow files"
+
+      - name: Nothing scrubbed has slipped back in
+        # SCRUB_DENYLIST is a repository secret holding the terms that must never appear (employer,
+        # people, internal tools). It is not available to pull requests from forks; the structural
+        # checks (credential ids, sheet ids, project refs, hostnames, IPs, chat ids) run regardless.
+        env:
+          SCRUB_DENYLIST: ${{ secrets.SCRUB_DENYLIST }}
+        run: python3 tools/scrub.py --check .
+
+      - name: Lint Python (pyflakes rules)
+        run: |
+          python3 -m pip install --quiet ruff
+          ruff check --select F tools site
+
+      - name: SQL migrations are non-empty and end with a semicolon
+        run: |
+          set -euo pipefail
+          for f in supabase/migrations/*.sql; do
+            python3 -c 'import sys; t=open(sys.argv[1]).read().rstrip(); assert t, sys.argv[1]+" is empty"; assert t.endswith(";"), sys.argv[1]+" does not end with a semicolon"; print("ok", sys.argv[1])' "$f"
+          done

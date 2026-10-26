@@ -25,7 +25,7 @@ The workflows and SQL in this repo are exports of a live system, passed through 
 
 ## Renamed to keep the employer unnamed
 
-- Database schema `deel` became `account_intel`; functions `deel_*` became `intel_*`; the product line `deel_it` became `it_equipment`. Workflow names lost their employer prefix (`AI D1 - ...`).
+- The database schema and the function prefix that carried the employer's name became `account_intel` and `intel_*`; the employer-branded product line became `it_equipment`. Workflow names lost their employer prefix (`AI D1 - ...`).
 - The employer's name in prose became "the vendor"; the SDR's name became "the SDR"; the CRM, dialler and contact-enrichment tool are described, not named; the CRM-side assistant is "the CRM-side agent".
 - The six customer case-study names and one headline statistic in the why-now prompt's proof-point list became `Customer A` to `Customer F` and `[vendor headline statistic]`, because they identify the vendor. The structure of the prompt is unchanged.
 - The competitor list in the careers-page scan kept every competitor and replaced the vendor's own entry with `own_brand`.

@@ -1,0 +1,29 @@
+# Hostnames that may appear in this repo. tools/scrub.py --check fails on anything else, so a real
+# n8n editor host, webhook host or internal tool domain cannot come back without an explicit edit here.
+api.anthropic.com
+api.apify.com
+api.ashbyhq.com
+api.company-information.service.gov.uk
+api.lever.co
+api.smartrecruiters.com
+apply.workable.com
+boards-api.greenhouse.io
+calendar.app.google
+docs.google.com
+example.com
+find-and-update.company-information.service.gov.uk
+get.docker.com
+hooks.example.com
+jobs.smartrecruiters.com
+n8n.example.com
+news.google.com
+opsautomated.co.uk
+recruit.zoho.uk
+schema.org
+sheets.googleapis.com
+stream.companieshouse.gov.uk
+www.linkedin.com
+www.opsautomated.co.uk
+www.reed.co.uk
+www.sitemaps.org
+www.w3.org
