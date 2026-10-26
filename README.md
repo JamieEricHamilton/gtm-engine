@@ -1,5 +1,7 @@
 # gtm-engine
 
+[![CI](https://github.com/JamieEricHamilton/gtm-engine/actions/workflows/ci.yml/badge.svg)](https://github.com/JamieEricHamilton/gtm-engine/actions/workflows/ci.yml)
+
 A signal-driven GTM system built by one non-developer in October 2026 with n8n, Postgres (Supabase) and Claude, self-hosted on a small cloud VM. It has three product surfaces on one architecture:
 
 - `account-intelligence/`: a B2B account intelligence pipeline that takes an account executive's book of ~3,200 companies, validates each one against the UK companies register, enriches it, watches for buying triggers (open roles abroad, raises found on the register before any press, expansion, distributed teams), scores it per product, writes a one-line trigger and discovery question for the SDR, ranks the right buyer contacts, pushes a call list to a sheet and pulls outcomes back nightly. Failures fire an agent that fixes the pipeline inside fixed permission boundaries. The employer is not named anywhere in this repo.
@@ -160,7 +162,7 @@ Three bugs in the first day were the same bug. PostgREST caps any response at 1,
 
 ### Dumb transport, smart database
 
-n8n nodes fetch and post. Dedupe, status rules, filters and thresholds live in SECURITY DEFINER functions in `public`, because the `account_intel` and `ops` schemas are not exposed to PostgREST. `ingest_signal` is one INSERT ... ON CONFLICT so parallel n8n branches cannot race. `intel_register_intake` takes the whole stream event as jsonb, so the register filter changes without touching n8n or the listener container. Row-level security is on with no policies: only the service role can read or write, and only through the functions.
+n8n nodes fetch and post. Dedupe, status rules, filters and thresholds live in SECURITY DEFINER functions in `public`, because the `account_intel` and `ops` schemas are not exposed to PostgREST. `ingest_signal` is one INSERT ... ON CONFLICT so parallel n8n branches cannot race. `intel_register_intake` takes the whole stream event as jsonb, so the register filter changes without touching n8n or the listener container. Row-level security is on with no policies: only the service role can read or write, and only through the functions. The one exception is deliberate: the aggregate-only `intel_results()` is also executable by the anon role, which is how the weekly RESULTS.md refresh runs without a privileged key (see below).
 
 ### Two-agent handover over a shared sheet
 
@@ -168,11 +170,11 @@ Two AI assistants that cannot share a tool (one has the CRM and the dialler, one
 
 ## Results
 
-See [RESULTS.md](RESULTS.md) for the live numbers with the SQL that produces them. The short version at the time of writing: 3,316 accounts; 2,840 matched to the register; 86% LinkedIn enrichment success; 44 register raises of £250k+ in the last six months with no press within 60 days of the allotment; 1,421 register events filtered to 28 promotions; 970 buyer contacts for 271 companies at a 92% found rate, 3.6 per company; roughly $0.018 per enriched account on the scraping provider this cycle; LLM spend under $20 across the whole build; two existing customers back-tested as A 95 and B 55 from public signals alone; 3 meetings marked by the SDR in the first two weeks, 2 of them in the first seven days, from the first 30 accounts worked. Meetings booked from the rep's own email sequences are tracked in the CRM and are not in these numbers.
+See [RESULTS.md](RESULTS.md) for the live numbers with the SQL that produces them. The short version at the time of writing: 3,316 accounts; 2,840 matched to the register; 86% LinkedIn enrichment success; 44 register raises of £250k+ in the last six months with no press within 60 days of the allotment; 1,421 register events filtered to 28 promotions; 970 buyer contacts for 271 companies at a 92% found rate, 3.6 per company; roughly $0.018 per enriched account on the scraping provider this cycle; LLM spend under $20 across the whole build; two existing customers back-tested as A 95 and B 55 from public signals alone; 5 meetings booked in the first week the list went live (4 by the SDR working from the sheet, 1 from the AE's own cold email using the generated trigger line), and the SDR has booked 12+ meetings a month from the list since. The sheet's Status column only captures the outcomes the SDR marks on it, so the sheet-derived counts in RESULTS.md (3 marked, 2 in the first seven days) are a floor rather than the full count; the reported figures sit alongside them in `account_intel.reported_outcomes` so the SQL and the prose agree.
 
 ## Known gaps and next steps
 
-- Outcome volume is small. Three meetings is a direction, not a conversion rate. The thresholds are round-number judgement calls and are not changed until outcomes say where meetings sit.
+- Outcome volume is small and partly self-reported. Five meetings in a week and a 12-a-month run rate are a direction, not a conversion rate, and the sheet only captures what the SDR marks. The thresholds are round-number judgement calls and are not changed until outcomes say where meetings sit.
 - The register stream listener needs an external liveness check; the last event received is visible in RESULTS.md and a stall is only noticed by reading it.
 - Row-level security is enabled on nine tables, not all of them. Every write already goes through SECURITY DEFINER functions with the service role, so there is no exposure, but it should be uniform.
 - No evals as code. Prompt quality was judged by reading output after each scorer change. A golden set for the news classifier and the trigger-line writer is the next build.
@@ -183,9 +185,13 @@ See [RESULTS.md](RESULTS.md) for the live numbers with the SQL that produces the
 
 ## How this was built
 
+Exported from the live self-hosted n8n instance and Supabase project on 26 October 2026; the systems themselves were built between August and October 2026.
+
 Built between 30 Sept and 26 Oct 2026, evenings and weekends, by one person who sells for a living and does not write code, working with Claude as build partner. The working method that made it possible: Claude connected to n8n and Supabase through MCP, writing nodes and SQL directly; the person reviewing, publishing and holding every credential and OAuth client; one node at a time against the live UI, never from memory; every decision and every bug written into a session log the same day. Three n8n modules were built in the first two afternoons; the recruitment stack was proven end to end (application email to acknowledged candidate in under a minute) by day eight; the account-intelligence pipeline went from an xlsx to a live, monitored call list in one day and gained the register stream the next.
 
-The export in this repo was produced by `tools/export_workflows.sh` and `tools/scrub.py`; see [docs/SCRUBBING.md](docs/SCRUBBING.md) for what was replaced and why. The scrub rules themselves are not committed because they contain the identifiers they remove.
+The export in this repo was produced by `tools/export_workflows.sh` and `tools/scrub.py`; see [docs/SCRUBBING.md](docs/SCRUBBING.md) for what was replaced and why. The scrub rules themselves are not committed because they contain the identifiers they remove. CI (`.github/workflows/ci.yml`) parses every workflow export, runs `tools/scrub.py --check` so a credential id, sheet id, project ref, hostname or denylisted term cannot come back unnoticed, lints the Python and checks the migrations.
+
+Security of the repo's own automation: no privileged key is held in GitHub Actions. The weekly results refresh calls one aggregate-only SQL function with the project's publishable (anon) key; anon has no table grants, RLS is default-deny, and that function is the only one anon may execute (`supabase/migrations/0004_results_access.sql`). Every action is pinned to a commit SHA and Dependabot proposes the bumps.
 
 ## Running it
 
