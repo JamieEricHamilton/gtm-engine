@@ -1,6 +1,6 @@
 # Results
 
-Generated 2026-10-26 14:05 UTC from `select public.intel_results();`
+Generated 2026-10-26 14:06 UTC from `select public.intel_results();`
 (definition in `supabase/migrations/0003_results.sql`). Aggregates only. Re-render with
 `python3 tools/render_results.py results/latest.json > RESULTS.md`; the weekly GitHub Action does the same.
 
@@ -22,7 +22,7 @@ Generated 2026-10-26 14:05 UTC from `select public.intel_results();`
 | LinkedIn jobs checked | 2887 | |
 | Accounts with a live role | 269 | 9.3% of checked (2096 job rows) |
 | Accounts with a live role outside the home market | 91 | 3.2% of checked |
-| News checked | 3037 | signals by kind: funding 592, ignored 122, layoffs 15, expansion 71, new_office 72, acquisition 139, people_hire 17, project_win 78 |
+| News checked | 3037 | signals by kind: funding 593, ignored 122, layoffs 15, expansion 71, new_office 72, acquisition 139, people_hire 17, project_win 78 |
 | Trigger lines written by the LLM | 366 | one per A/B account, regenerated only when the evidence changes |
 
 Bands under scorer v1.6: A 56, B 272, C 1503, D 1485.
@@ -36,7 +36,7 @@ A and B together are 9.9% of the accounts.
 | Accounts with a confident register raise (SH01 share allotment, amount parsed from the PDF) | 82 |
 | Register raises of £250k+ in the last 180 days with no press within 60 days of the allotment | 44 |
 | Total parsed from SH01 PDFs in the last 180 days (per-account sums between £1k and £50m) | £525,446,823 |
-| Capital filings stored | 443 |
+| Capital filings stored | 444 |
 | SH01 PDFs parsed | 304 |
 | Net-new funded companies found from the press | 94 |
 | ...of which already owned by a colleague in the CRM | 47 (50.0%) |
